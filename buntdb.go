@@ -63,33 +63,50 @@ var (
 // DB represents a collection of key-value pairs that persist on disk.
 // Transactions are used for all forms of data access to the DB.
 type DB struct {
-	mu        sync.RWMutex      // the gatekeeper for all fields
-	file      *os.File          // the underlying file
-	buf       []byte            // a buffer to write to
-	keys      *btree.BTree      // a tree of all item ordered by key
-	exps      *btree.BTree      // a tree of items ordered by expiration
-	idxs      map[string]*index // the index trees.
-	exmgr     bool              // indicates that expires manager is running.
-	flushes   int               // a count of the number of disk flushes
-	closed    bool              // set when the database has been closed
-	config    Config            // the database configuration
-	persist   bool              // do we write to disk
-	shrinking bool              // when an aof shrink is in-process.
-	lastaofsz int               // the size of the last shrink aof size
+
+	mu sync.RWMutex // the gatekeeper for all fields
+
+	file *os.File // the underlying file
+
+	buf []byte // a buffer to write to
+
+	keys *btree.BTree // a tree of all item ordered by key
+
+	exps *btree.BTree // a tree of items ordered by expiration
+
+	idxs map[string]*index // the index trees.
+
+	exmgr bool // indicates that expires manager is running.
+
+	flushes int // a count of the number of disk flushes
+
+	closed bool // set when the database has been closed
+
+	config Config // the database configuration
+
+	persist bool // do we write to disk
+
+	shrinking bool // when an aof shrink is in-process.
+
+	lastaofsz int // the size of the last shrink aof size
+
 }
 
 // SyncPolicy represents how often data is synced to disk.
 type SyncPolicy int
 
 const (
+
 	// Never is used to disable syncing data to disk.
 	// The faster and less safe method.
 	Never SyncPolicy = 0
+
 	// EverySecond is used to sync data to disk every second.
-	// It's pretty fast and you can lose 1 second of data if there
-	// is a disaster.
+	//
+	// It's pretty fast and you can lose 1 second of data if there is a disaster.
 	// This is the recommended setting.
 	EverySecond = 1
+
 	// Always is used to sync data after every write to disk.
 	// Slow. Very safe.
 	Always = 2
@@ -98,8 +115,10 @@ const (
 // Config represents database configuration options. These
 // options are used to change various behaviors of the database.
 type Config struct {
+
 	// SyncPolicy adjusts how often the data is synced to disk.
 	// This value can be Never, EverySecond, or Always.
+	//
 	// The default is EverySecond.
 	SyncPolicy SyncPolicy
 
@@ -138,28 +157,44 @@ type exctx struct {
 const btreeDegrees = 64
 
 // Open opens a database at the provided path.
+//
 // If the file does not exist then it will be created automatically.
+//
 func Open(path string) (*DB, error) {
+
+	// new a db object
 	db := &DB{}
+
 	// initialize trees and indexes
 	db.keys = btree.New(btreeDegrees, nil)
 	db.exps = btree.New(btreeDegrees, &exctx{db})
 	db.idxs = make(map[string]*index)
+
 	// initialize default configuration
 	db.config = Config{
-		SyncPolicy:           EverySecond,
-		AutoShrinkPercentage: 100,
-		AutoShrinkMinSize:    32 * 1024 * 1024,
+		// sync data to disk every second.
+		SyncPolicy: EverySecond,
+		// trigger a shrink of the aof file when the size of the file is larger
+		// than the percentage of the result of the previous shrunk file.
+		AutoShrinkPercentage: 100, // 100%
+		// the minimum size of the aof file before an automatic shrink can occur.
+		AutoShrinkMinSize: 32 * 1024 * 1024, // 32MB
 	}
+
 	// turn off persistence for pure in-memory
 	db.persist = path != ":memory:"
+
+	// if path refer a valid disk file, open and load it.
 	if db.persist {
+
 		var err error
-		// hardcoding 0666 as the default mode.
+
+		// open file, hardcoding 0666 as the default mode.
 		db.file, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0666)
 		if err != nil {
 			return nil, err
 		}
+
 		// load the database from disk
 		if err := db.load(); err != nil {
 			// close on error, ignore close error
@@ -167,8 +202,10 @@ func Open(path string) (*DB, error) {
 			return nil, err
 		}
 	}
+
 	// start the background manager.
 	go db.backgroundManager()
+
 	return db, nil
 }
 
@@ -177,49 +214,70 @@ func Open(path string) (*DB, error) {
 func (db *DB) Close() error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
 	if db.closed {
 		return ErrDatabaseClosed
 	}
+
 	db.closed = true
 	if db.persist {
-		db.file.Sync() // do a sync but ignore the error
+		// do a sync but ignore the error
+		db.file.Sync()
+		// close file
 		if err := db.file.Close(); err != nil {
 			return err
 		}
 	}
-	// Let's release all references to nil. This will help both with debugging
-	// late usage panics and it provides a hint to the garbage collector
+
+	// Let's release all references to nil.
+	//
+	// This will help both with debugging late usage panics
+	// and it provides a hint to the garbage collector
 	db.keys, db.exps, db.idxs, db.file = nil, nil, nil, nil
+
 	return nil
 }
 
-// Save writes a snapshot of the database to a writer. This operation blocks all
-// writes, but not reads. This can be used for snapshots and backups for pure
-// in-memory databases using the ":memory:". Database that persist to disk
-// can be snapshotted by simply copying the database file.
+// Save writes a snapshot of the database to a writer.
+//
+// This operation blocks all writes, but not reads.
+//
+// This can be used for snapshots and backups for pure in-memory databases using the ":memory:".
+//
+// Database that persist to disk can be snapshotted by simply copying the database file.
+//
 func (db *DB) Save(wr io.Writer) error {
 	var err error
+
 	db.mu.RLock()
 	defer db.mu.RUnlock()
+
 	// use a buffered writer and flush every 4MB
 	var buf []byte
+
 	// iterated through every item in the database and write to the buffer
-	db.keys.Ascend(func(item btree.Item) bool {
-		dbi := item.(*dbItem)
-		buf = dbi.writeSetTo(buf)
-		if len(buf) > 1024*1024*4 {
-			// flush when buffer is over 4MB
-			_, err = wr.Write(buf)
-			if err != nil {
-				return false
+	db.keys.Ascend(
+
+		func(item btree.Item) bool {
+			// save item.key, item.value to buf in specific format
+			buf = item.(*dbItem).writeSetTo(buf)
+			// flush buf when len(buffer) is over 4MB
+			if len(buf) > 1024*1024*4 {
+				_, err = wr.Write(buf) 	// flush buf
+				if err != nil {
+					return false
+				}
+				buf = buf[:0]			// clear buf
 			}
-			buf = buf[:0]
-		}
-		return true
-	})
+			return true
+		},
+
+	)
+
 	if err != nil {
 		return err
 	}
+
 	// one final flush
 	if len(buf) > 0 {
 		_, err = wr.Write(buf)
@@ -227,40 +285,69 @@ func (db *DB) Save(wr io.Writer) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
-// Load loads commands from reader. This operation blocks all reads and writes.
-// Note that this can only work for fully in-memory databases opened with
-// Open(":memory:").
+// Load loads commands from reader.
+//
+// This operation blocks all reads and writes.
+//
+// Note that this can only work for fully in-memory databases opened with Open(":memory:").
+//
 func (db *DB) Load(rd io.Reader) error {
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
 	if db.persist {
 		// cannot load into databases that persist to disk
 		return ErrPersistenceActive
 	}
+
 	return db.readLoad(rd, time.Now())
 }
 
 // index represents a b-tree or r-tree index and also acts as the
 // b-tree/r-tree context for itself.
 type index struct {
+
 	btr     *btree.BTree                           // contains the items
 	rtr     *rtree.RTree                           // contains the items
+
+
+	//
 	name    string                                 // name of the index
+
+	// Pattern specifies which keys the index takes effect on.
+	// You can create an index only for some keys of a specific pattern.
+	//
+	// "*" indicates all keys
+	// "user:*:name" indicates keys with name start with "user:" and end by ":name".
+	//
+	// With the less function, we can customize the sorting rules.
+	//
+	// Some sorting rules are built in buntdb, such as IndexString, which is insensitive to case,
+	// IndexInt/IndexUint/Indexfloat performs sorting of numeric types.
+	//
 	pattern string                                 // a required key pattern
+
+
 	less    func(a, b string) bool                 // less comparison function
 	rect    func(item string) (min, max []float64) // rect from string function
+
 	db      *DB                                    // the origin database
 	opts    IndexOptions                           // index options
 }
 
 // match matches the pattern to the key
 func (idx *index) match(key string) bool {
+
+	//
 	if idx.pattern == "*" {
 		return true
 	}
+
 	if idx.opts.CaseInsensitiveKeyMatching {
 		for i := 0; i < len(key); i++ {
 			if key[i] >= 'A' && key[i] <= 'Z' {
@@ -269,11 +356,15 @@ func (idx *index) match(key string) bool {
 			}
 		}
 	}
+
+	//
 	return match.Match(key, idx.pattern)
 }
 
+
 // clearCopy creates a copy of the index, but with an empty dataset.
 func (idx *index) clearCopy() *index {
+
 	// copy the index meta information
 	nidx := &index{
 		name:    idx.name,
@@ -283,38 +374,50 @@ func (idx *index) clearCopy() *index {
 		rect:    idx.rect,
 		opts:    idx.opts,
 	}
+
 	// initialize with empty trees
 	if nidx.less != nil {
 		nidx.btr = btree.New(btreeDegrees, nidx)
 	}
+
 	if nidx.rect != nil {
 		nidx.rtr = rtree.New(nidx)
 	}
+
 	return nidx
 }
 
 // rebuild rebuilds the index
 func (idx *index) rebuild() {
+
 	// initialize trees
 	if idx.less != nil {
 		idx.btr = btree.New(btreeDegrees, idx)
 	}
+
+	//
 	if idx.rect != nil {
 		idx.rtr = rtree.New(idx)
 	}
+
 	// iterate through all keys and fill the index
 	idx.db.keys.Ascend(func(item btree.Item) bool {
+
 		dbi := item.(*dbItem)
+
 		if !idx.match(dbi.key) {
 			// does not match the pattern, continue
 			return true
 		}
+
 		if idx.less != nil {
 			idx.btr.ReplaceOrInsert(dbi)
 		}
+
 		if idx.rect != nil {
 			idx.rtr.Insert(dbi)
 		}
+
 		return true
 	})
 }
@@ -334,33 +437,38 @@ func (idx *index) rebuild() {
 // less function to handle the content format and comparison.
 // There are some default less function that can be used such as
 // IndexString, IndexBinary, etc.
-func (db *DB) CreateIndex(name, pattern string,
-	less ...func(a, b string) bool) error {
-	return db.Update(func(tx *Tx) error {
-		return tx.CreateIndex(name, pattern, less...)
-	})
+func (db *DB) CreateIndex(name, pattern string, less ...func(a, b string) bool) error {
+
+	return db.Update(
+
+		func(tx *Tx) error {
+			return tx.CreateIndex(name, pattern, less...)
+		},
+
+	)
 }
 
 // ReplaceIndex builds a new index and populates it with items.
 // The items are ordered in an b-tree and can be retrieved using the
 // Ascend* and Descend* methods.
 // If a previous index with the same name exists, that index will be deleted.
-func (db *DB) ReplaceIndex(name, pattern string,
-	less ...func(a, b string) bool) error {
-	return db.Update(func(tx *Tx) error {
-		err := tx.CreateIndex(name, pattern, less...)
-		if err != nil {
-			if err == ErrIndexExists {
-				err := tx.DropIndex(name)
-				if err != nil {
-					return err
+func (db *DB) ReplaceIndex(name, pattern string, less ...func(a, b string) bool) error {
+	return db.Update(
+		func(tx *Tx) error {
+			err := tx.CreateIndex(name, pattern, less...)
+			if err != nil {
+				if err == ErrIndexExists {
+					err := tx.DropIndex(name)
+					if err != nil {
+						return err
+					}
+					return tx.CreateIndex(name, pattern, less...)
 				}
-				return tx.CreateIndex(name, pattern, less...)
+				return err
 			}
-			return err
-		}
-		return nil
-	})
+			return nil
+		},
+	)
 }
 
 // CreateSpatialIndex builds a new index and populates it with items.
@@ -377,33 +485,41 @@ func (db *DB) ReplaceIndex(name, pattern string,
 // Thus min[0] must be less-than-or-equal-to max[0].
 // The IndexRect is a default function that can be used for the rect
 // parameter.
-func (db *DB) CreateSpatialIndex(name, pattern string,
-	rect func(item string) (min, max []float64)) error {
-	return db.Update(func(tx *Tx) error {
-		return tx.CreateSpatialIndex(name, pattern, rect)
-	})
+func (db *DB) CreateSpatialIndex(name, pattern string, rect func(item string) (min, max []float64)) error {
+	return db.Update(
+		func(tx *Tx) error {
+			return tx.CreateSpatialIndex(name, pattern, rect)
+		},
+	)
 }
 
 // ReplaceSpatialIndex builds a new index and populates it with items.
+//
 // The items are organized in an r-tree and can be retrieved using the
 // Intersects method.
+//
 // If a previous index with the same name exists, that index will be deleted.
-func (db *DB) ReplaceSpatialIndex(name, pattern string,
-	rect func(item string) (min, max []float64)) error {
-	return db.Update(func(tx *Tx) error {
-		err := tx.CreateSpatialIndex(name, pattern, rect)
-		if err != nil {
-			if err == ErrIndexExists {
-				err := tx.DropIndex(name)
-				if err != nil {
-					return err
+//
+func (db *DB) ReplaceSpatialIndex(name, pattern string, rect func(item string) (min, max []float64)) error {
+
+	return db.Update(
+
+		func(tx *Tx) error {
+
+			err := tx.CreateSpatialIndex(name, pattern, rect)
+			if err != nil {
+				if err == ErrIndexExists {
+					err := tx.DropIndex(name)
+					if err != nil {
+						return err
+					}
+					return tx.CreateSpatialIndex(name, pattern, rect)
 				}
-				return tx.CreateSpatialIndex(name, pattern, rect)
+				return err
 			}
-			return err
-		}
-		return nil
-	})
+			return nil
+		},
+	)
 }
 
 // DropIndex removes an index.
@@ -455,44 +571,75 @@ func (db *DB) SetConfig(config Config) error {
 // all indexes. If a previous item with the same key already exists, that item
 // will be replaced with the new one, and return the previous item.
 func (db *DB) insertIntoDatabase(item *dbItem) *dbItem {
+
+
 	var pdbi *dbItem
+
+
 	prev := db.keys.ReplaceOrInsert(item)
+
+
 	if prev != nil {
-		// A previous item was removed from the keys tree. Let's
-		// fully delete this item from all indexes.
+
+		// A previous item was removed from the keys tree.
+		// Let's fully delete this item from all indexes.
 		pdbi = prev.(*dbItem)
 		if pdbi.opts != nil && pdbi.opts.ex {
+
 			// Remove it from the exipres tree.
 			db.exps.Delete(pdbi)
+
 		}
+
+
 		for _, idx := range db.idxs {
+
+
 			if idx.btr != nil {
 				// Remove it from the btree index.
 				idx.btr.Delete(pdbi)
 			}
+
+
 			if idx.rtr != nil {
 				// Remove it from the rtree index.
 				idx.rtr.Remove(pdbi)
 			}
+
+
 		}
 	}
+
+
 	if item.opts != nil && item.opts.ex {
-		// The new item has eviction options. Add it to the
-		// expires tree
+
+		// The new item has eviction options.
+		// Add it to the expires tree
 		db.exps.ReplaceOrInsert(item)
 	}
+
+
+
+
 	for _, idx := range db.idxs {
+
+
 		if !idx.match(item.key) {
 			continue
 		}
+
+
 		if idx.btr != nil {
 			// Add new item to btree index.
 			idx.btr.ReplaceOrInsert(item)
 		}
+
+
 		if idx.rtr != nil {
 			// Add new item to rtree index.
 			idx.rtr.Insert(item)
 		}
+
 	}
 	// we must return the previous item to the caller.
 	return pdbi
@@ -509,10 +656,12 @@ func (db *DB) deleteFromDatabase(item *dbItem) *dbItem {
 	prev := db.keys.Delete(item)
 	if prev != nil {
 		pdbi = prev.(*dbItem)
+
 		if pdbi.opts != nil && pdbi.opts.ex {
 			// Remove it from the exipres tree.
 			db.exps.Delete(pdbi)
 		}
+
 		for _, idx := range db.idxs {
 			if idx.btr != nil {
 				// Remove it from the btree index.
@@ -530,21 +679,36 @@ func (db *DB) deleteFromDatabase(item *dbItem) *dbItem {
 // backgroundManager runs continuously in the background and performs various
 // operations such as removing expired items and syncing to disk.
 func (db *DB) backgroundManager() {
+
 	flushes := 0
+
+	// trigger every second
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+
 	for range t.C {
+
 		var shrink bool
-		// Open a standard view. This will take a full lock of the
-		// database thus allowing for access to anything we need.
+
+		// Open a standard view.
+		//
+		// This will take a full lock of the database thus allowing for access to anything we need.
+		//
+
 		var onExpired func([]string)
+
 		var expired []*dbItem
+
 		var onExpiredSync func(key, value string, tx *Tx) error
+
 		err := db.Update(func(tx *Tx) error {
+
 			onExpired = db.config.OnExpired
+
 			if onExpired == nil {
 				onExpiredSync = db.config.OnExpiredSync
 			}
+
 			if db.persist && !db.config.AutoShrinkDisabled {
 				pos, err := db.file.Seek(0, 1)
 				if err != nil {
@@ -556,6 +720,7 @@ func (db *DB) backgroundManager() {
 					shrink = aofsz > db.lastaofsz+int(float64(db.lastaofsz)*prc)
 				}
 			}
+
 			// produce a list of expired items that need removing
 			db.exps.AscendLessThan(&dbItem{
 				opts: &dbItemOpts{ex: true, exat: time.Now()},
@@ -563,55 +728,78 @@ func (db *DB) backgroundManager() {
 				expired = append(expired, item.(*dbItem))
 				return true
 			})
+
 			if onExpired == nil && onExpiredSync == nil {
+
 				for _, itm := range expired {
+
 					if _, err := tx.Delete(itm.key); err != nil {
+
 						// it's ok to get a "not found" because the
 						// 'Delete' method reports "not found" for
 						// expired items.
 						if err != ErrNotFound {
 							return err
 						}
+
 					}
+
 				}
+
 			} else if onExpiredSync != nil {
+
 				for _, itm := range expired {
+
 					if err := onExpiredSync(itm.key, itm.val, tx); err != nil {
 						return err
 					}
+
 				}
+
 			}
 			return nil
 		})
+
 		if err == ErrDatabaseClosed {
 			break
 		}
 
 		// send expired event, if needed
 		if onExpired != nil && len(expired) > 0 {
+
 			keys := make([]string, 0, 32)
+
 			for _, itm := range expired {
 				keys = append(keys, itm.key)
 			}
+
 			onExpired(keys)
 		}
 
 		// execute a disk sync, if needed
 		func() {
+
 			db.mu.Lock()
 			defer db.mu.Unlock()
+
 			if db.persist && db.config.SyncPolicy == EverySecond &&
 				flushes != db.flushes {
 				_ = db.file.Sync()
 				flushes = db.flushes
 			}
+
 		}()
+
 		if shrink {
+
 			if err = db.Shrink(); err != nil {
+
 				if err == ErrDatabaseClosed {
 					break
 				}
+
 			}
+
 		}
 	}
 }
@@ -619,49 +807,58 @@ func (db *DB) backgroundManager() {
 // Shrink will make the database file smaller by removing redundant
 // log entries. This operation does not block the database.
 func (db *DB) Shrink() error {
+
 	db.mu.Lock()
+
 	if db.closed {
 		db.mu.Unlock()
 		return ErrDatabaseClosed
 	}
+
 	if !db.persist {
 		// The database was opened with ":memory:" as the path.
 		// There is no persistence, and no need to do anything here.
 		db.mu.Unlock()
 		return nil
 	}
+
 	if db.shrinking {
 		// The database is already in the process of shrinking.
 		db.mu.Unlock()
 		return ErrShrinkInProcess
 	}
+
 	db.shrinking = true
+
 	defer func() {
 		db.mu.Lock()
 		db.shrinking = false
 		db.mu.Unlock()
 	}()
+
 	fname := db.file.Name()
 	tmpname := fname + ".tmp"
+
 	// the endpos is used to return to the end of the file when we are
 	// finished writing all of the current items.
 	endpos, err := db.file.Seek(0, 2)
 	if err != nil {
 		return err
 	}
+
 	db.mu.Unlock()
 	time.Sleep(time.Second / 4) // wait just a bit before starting
 	f, err := os.Create(tmpname)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		_ = f.Close()
 		_ = os.RemoveAll(tmpname)
 	}()
 
-	// we are going to read items in as chunks as to not hold up the database
-	// for too long.
+	// we are going to read items in as chunks as to not hold up the database for too long.
 	var buf []byte
 	pivot := ""
 	done := false
@@ -700,12 +897,13 @@ func (db *DB) Shrink() error {
 			return err
 		}
 	}
+
 	// We reached this far so all of the items have been written to a new tmp
 	// There's some more work to do by appending the new line from the aof
 	// to the tmp file and finally swap the files out.
 	return func() error {
-		// We're wrapping this in a function to get the benefit of a defered
-		// lock/unlock.
+
+		// We're wrapping this in a function to get the benefit of a defered lock/unlock.
 		db.mu.Lock()
 		defer db.mu.Unlock()
 		if db.closed {
@@ -752,6 +950,7 @@ func (db *DB) Shrink() error {
 		db.lastaofsz = int(pos)
 		return nil
 	}()
+
 }
 
 var errValidEOF = errors.New("valid eof")
@@ -902,32 +1101,43 @@ func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
 // load reads entries from the append only database file and fills the database.
 // The file format uses the Redis append only file format, which is and a series
 // of RESP commands. For more information on RESP please read
-// http://redis.io/topics/protocol. The only supported RESP commands are DEL and
-// SET.
+// http://redis.io/topics/protocol. The only supported RESP commands are DEL and SET.
 func (db *DB) load() error {
+
+	// check file exist
 	fi, err := db.file.Stat()
 	if err != nil {
 		return err
 	}
+
+	// load from file
 	if err := db.readLoad(db.file, fi.ModTime()); err != nil {
 		return err
 	}
+
+	// seek to the end
 	pos, err := db.file.Seek(0, 2)
 	if err != nil {
 		return err
 	}
+
+	// save offset
 	db.lastaofsz = int(pos)
+
 	return nil
 }
 
 // managed calls a block of code that is fully contained in a transaction.
 // This method is intended to be wrapped by Update and View
 func (db *DB) managed(writable bool, fn func(tx *Tx) error) (err error) {
+
 	var tx *Tx
+
 	tx, err = db.Begin(writable)
 	if err != nil {
 		return
 	}
+
 	defer func() {
 		if err != nil {
 			// The caller returned an error. We must rollback.
@@ -942,10 +1152,12 @@ func (db *DB) managed(writable bool, fn func(tx *Tx) error) (err error) {
 			err = tx.Rollback()
 		}
 	}()
+
 	tx.funcd = true
 	defer func() {
 		tx.funcd = false
 	}()
+
 	err = fn(tx)
 	return
 }
@@ -994,12 +1206,18 @@ type Tx struct {
 	wc       *txWriteContext // context for writable transactions.
 }
 
+
+//
 type txWriteContext struct {
+
+
 	// rollback when deleteAll is called
 	rbkeys *btree.BTree      // a tree of all item ordered by key
 	rbexps *btree.BTree      // a tree of items ordered by expiration
 	rbidxs map[string]*index // the index trees.
 
+
+	//
 	rollbackItems   map[string]*dbItem // details for rolling back tx.
 	commitItems     map[string]*dbItem // details for committing tx.
 	itercount       int                // stack of iterators
@@ -1008,20 +1226,26 @@ type txWriteContext struct {
 
 // DeleteAll deletes all items from the database.
 func (tx *Tx) DeleteAll() error {
+
+	// check if closed
 	if tx.db == nil {
 		return ErrTxClosed
+	// check if writable(deletable)
 	} else if !tx.writable {
 		return ErrTxNotWritable
+	// check if in iterating
 	} else if tx.wc.itercount > 0 {
 		return ErrTxIterating
 	}
 
 	// check to see if we've already deleted everything
 	if tx.wc.rbkeys == nil {
+
 		// we need to backup the live data in case of a rollback.
 		tx.wc.rbkeys = tx.db.keys
 		tx.wc.rbexps = tx.db.exps
 		tx.wc.rbidxs = tx.db.idxs
+
 	}
 
 	// now reset the live database trees
@@ -1041,32 +1265,46 @@ func (tx *Tx) DeleteAll() error {
 }
 
 // Begin opens a new transaction.
+//
 // Multiple read-only transactions can be opened at the same time but there can
 // only be one read/write transaction at a time. Attempting to open a read/write
 // transactions while another one is in progress will result in blocking until
 // the current read/write transaction is completed.
 //
 // All transactions must be closed by calling Commit() or Rollback() when done.
+//
+//
+//
 func (db *DB) Begin(writable bool) (*Tx, error) {
+
+	// new a transaction object
 	tx := &Tx{
 		db:       db,
 		writable: writable,
 	}
+
+	// lock tx.db based on the transaction type 'writable'
 	tx.lock()
+
 	if db.closed {
 		tx.unlock()
 		return nil, ErrDatabaseClosed
 	}
+
 	if writable {
+
+		// [attention]
 		// writable transactions have a writeContext object that
 		// contains information about changes to the database.
 		tx.wc = &txWriteContext{}
-		tx.wc.rollbackItems = make(map[string]*dbItem)
+		tx.wc.rollbackItems   = make(map[string]*dbItem)
 		tx.wc.rollbackIndexes = make(map[string]*index)
 		if db.persist {
 			tx.wc.commitItems = make(map[string]*dbItem)
 		}
+
 	}
+
 	return tx, nil
 }
 
@@ -1091,12 +1329,18 @@ func (tx *Tx) unlock() {
 // rollbackInner handles the underlying rollback logic.
 // Intended to be called from Commit() and Rollback().
 func (tx *Tx) rollbackInner() {
+
+
 	// rollback the deleteAll if needed
 	if tx.wc.rbkeys != nil {
+
 		tx.db.keys = tx.wc.rbkeys
 		tx.db.idxs = tx.wc.rbidxs
 		tx.db.exps = tx.wc.rbexps
+
 	}
+
+
 	for key, item := range tx.wc.rollbackItems {
 		tx.db.deleteFromDatabase(&dbItem{key: key})
 		if item != nil {
@@ -1105,6 +1349,8 @@ func (tx *Tx) rollbackInner() {
 			tx.db.insertIntoDatabase(item)
 		}
 	}
+
+
 	for name, idx := range tx.wc.rollbackIndexes {
 		delete(tx.db.idxs, name)
 		if idx != nil {
@@ -1115,27 +1361,38 @@ func (tx *Tx) rollbackInner() {
 			idx.rebuild()
 		}
 	}
+
+
 }
 
 // Commit writes all changes to disk.
 // An error is returned when a write error occurs, or when a Commit() is called
 // from a read-only transaction.
 func (tx *Tx) Commit() error {
+
+
 	if tx.funcd {
 		panic("managed tx commit not allowed")
 	}
+
+
 	if tx.db == nil {
 		return ErrTxClosed
 	} else if !tx.writable {
 		return ErrTxNotWritable
 	}
+
+
 	var err error
 	if tx.db.persist && (len(tx.wc.commitItems) > 0 || tx.wc.rbkeys != nil) {
+
 		tx.db.buf = tx.db.buf[:0]
+
 		// write a flushdb if a deleteAll was called.
 		if tx.wc.rbkeys != nil {
 			tx.db.buf = append(tx.db.buf, "*1\r\n$7\r\nflushdb\r\n"...)
 		}
+
 		// Each committed record is written to disk
 		for key, item := range tx.wc.commitItems {
 			if item == nil {
@@ -1144,58 +1401,86 @@ func (tx *Tx) Commit() error {
 				tx.db.buf = item.writeSetTo(tx.db.buf)
 			}
 		}
+
+
 		// Flushing the buffer only once per transaction.
-		// If this operation fails then the write did failed and we must
-		// rollback.
+		// If this operation fails then the write did failed and we must rollback.
 		if _, err = tx.db.file.Write(tx.db.buf); err != nil {
 			tx.rollbackInner()
 		}
+
+
 		if tx.db.config.SyncPolicy == Always {
 			_ = tx.db.file.Sync()
 		}
+
+
 		// Increment the number of flushes. The background syncing uses this.
 		tx.db.flushes++
+
+
 	}
+
+
 	// Unlock the database and allow for another writable transaction.
 	tx.unlock()
+
+
 	// Clear the db field to disable this transaction from future use.
 	tx.db = nil
+
+
 	return err
 }
+
+
+
 
 // Rollback closes the transaction and reverts all mutable operations that
 // were performed on the transaction such as Set() and Delete().
 //
 // Read-only transactions can only be rolled back, not committed.
 func (tx *Tx) Rollback() error {
+
 	if tx.funcd {
 		panic("managed tx rollback not allowed")
 	}
+
 	if tx.db == nil {
 		return ErrTxClosed
 	}
+
 	// The rollback func does the heavy lifting.
 	if tx.writable {
 		tx.rollbackInner()
 	}
+
 	// unlock the database for more transactions.
 	tx.unlock()
+
 	// Clear the db field to disable this transaction from future use.
 	tx.db = nil
+
 	return nil
 }
+
+
+
+
 
 // dbItemOpts holds various meta information about an item.
 type dbItemOpts struct {
 	ex   bool      // does this item expire?
 	exat time.Time // when does this item expire?
 }
+
 type dbItem struct {
 	key, val string      // the binary key and value
 	opts     *dbItemOpts // optional meta information
 	keyless  bool        // keyless item for scanning
 }
 
+// eg. buf = [*, 5, \r, \n]
 func appendArray(buf []byte, count int) []byte {
 	buf = append(buf, '*')
 	buf = append(buf, strconv.FormatInt(int64(count), 10)...)
@@ -1203,6 +1488,7 @@ func appendArray(buf []byte, count int) []byte {
 	return buf
 }
 
+// eg. buf = [$, 5, \r, \n, s..., \r, \n]
 func appendBulkString(buf []byte, s string) []byte {
 	buf = append(buf, '$')
 	buf = append(buf, strconv.FormatInt(int64(len(s)), 10)...)
@@ -1214,44 +1500,49 @@ func appendBulkString(buf []byte, s string) []byte {
 
 // writeSetTo writes an item as a single SET record to the a bufio Writer.
 func (dbi *dbItem) writeSetTo(buf []byte) []byte {
+
 	if dbi.opts != nil && dbi.opts.ex {
+		// expiration in seconds
 		ex := dbi.opts.exat.Sub(time.Now()) / time.Second
-		buf = appendArray(buf, 5)
-		buf = appendBulkString(buf, "set")
-		buf = appendBulkString(buf, dbi.key)
-		buf = appendBulkString(buf, dbi.val)
-		buf = appendBulkString(buf, "ex")
-		buf = appendBulkString(buf, strconv.FormatUint(uint64(ex), 10))
+		// build byte slice
+		buf = appendArray(buf, 5)											// [*, 5, \r, \n]
+		buf = appendBulkString(buf, "set")									// [$, 3, \r, \n, s, e, t, \r, \n]
+		buf = appendBulkString(buf, dbi.key)									// [$, 3, \r, \n, k, e, y, \r, \n]
+		buf = appendBulkString(buf, dbi.val)									// [$, 5, \r, \n, v, a, l, u, e, \r, \n]
+		buf = appendBulkString(buf, "ex") 									// [$, 2, \r, \n, e, x, \r, \n]
+		buf = appendBulkString(buf, strconv.FormatUint(uint64(ex), 10))	// [$, 2, \r, \n, 1, 0, \r, \n]
 	} else {
-		buf = appendArray(buf, 3)
-		buf = appendBulkString(buf, "set")
-		buf = appendBulkString(buf, dbi.key)
-		buf = appendBulkString(buf, dbi.val)
+		buf = appendArray(buf, 3)			// [*, 3, \r, \n]
+		buf = appendBulkString(buf, "set")	// [$, 3, \r, \n, s, e, t, \r, \n]
+		buf = appendBulkString(buf, dbi.key)	// [$, 3, \r, \n, k, e, y, \r, \n]
+		buf = appendBulkString(buf, dbi.val)	// [$, 5, \r, \n, v, a, l, u, e, \r, \n]
 	}
+
 	return buf
 }
 
 // writeSetTo writes an item as a single DEL record to the a bufio Writer.
 func (dbi *dbItem) writeDeleteTo(buf []byte) []byte {
-	buf = appendArray(buf, 2)
-	buf = appendBulkString(buf, "del")
-	buf = appendBulkString(buf, dbi.key)
+	buf = appendArray(buf, 2)			// [*, 2, \r, \n]
+	buf = appendBulkString(buf, "del")	// [$, 3, \r, \n, d, e, l, \r, \n]
+	buf = appendBulkString(buf, dbi.key)	// [$, 3, \r, \n, k, e, y, \r, \n]
 	return buf
 }
 
-// expired evaluates id the item has expired. This will always return false when
-// the item does not have `opts.ex` set to true.
+// expired evaluates if the item has expired.
+// This will always return false when the item does not have `opts.ex` set to true.
 func (dbi *dbItem) expired() bool {
 	return dbi.opts != nil && dbi.opts.ex && time.Now().After(dbi.opts.exat)
 }
 
 // MaxTime from http://stackoverflow.com/questions/25065055#32620397
-// This is a long time in the future. It's an imaginary number that is
-// used for b-tree ordering.
+// This is a long time in the future.
+// It's an imaginary number that is used for b-tree ordering.
 var maxTime = time.Unix(1<<63-62135596801, 999999999)
 
-// expiresAt will return the time when the item will expire. When an item does
-// not expire `maxTime` is used.
+// expiresAt will return the time when the item will expire.
+//
+// When an item does not expire `maxTime` is return.
 func (dbi *dbItem) expiresAt() time.Time {
 	if dbi.opts == nil || !dbi.opts.ex {
 		return maxTime
@@ -1259,22 +1550,35 @@ func (dbi *dbItem) expiresAt() time.Time {
 	return dbi.opts.exat
 }
 
-// Less determines if a b-tree item is less than another. This is required
-// for ordering, inserting, and deleting items from a b-tree. It's important
-// to note that the ctx parameter is used to help with determine which
-// formula to use on an item. Each b-tree should use a different ctx when
-// sharing the same item.
+// Less determines if a b-tree item is less than another.
+//
+// This is required for ordering, inserting, and deleting items from a b-tree.
+//
+// It's important to note that the ctx parameter is used to help with determine
+// which formula to use on an item.
+//
+// Each b-tree should use a different ctx when sharing the same item.
+//
+//
 func (dbi *dbItem) Less(item btree.Item, ctx interface{}) bool {
+
+	// convert item to *dbItem
 	dbi2 := item.(*dbItem)
+
+	//
 	switch ctx := ctx.(type) {
+
 	case *exctx:
+
 		// The expires b-tree formula
 		if dbi2.expiresAt().After(dbi.expiresAt()) {
 			return true
 		}
+
 		if dbi.expiresAt().After(dbi2.expiresAt()) {
 			return false
 		}
+
 	case *index:
 		if ctx.less != nil {
 			// Using an index
@@ -1286,12 +1590,15 @@ func (dbi *dbItem) Less(item btree.Item, ctx interface{}) bool {
 			}
 		}
 	}
+
 	// Always fall back to the key comparison. This creates absolute uniqueness.
 	if dbi.keyless {
 		return false
 	} else if dbi2.keyless {
 		return true
 	}
+
+
 	return dbi.key < dbi2.key
 }
 
@@ -1304,6 +1611,8 @@ func (dbi *dbItem) Rect(ctx interface{}) (min, max []float64) {
 	}
 	return nil, nil
 }
+
+
 
 // SetOptions represents options that may be included with the Set() command.
 type SetOptions struct {
@@ -1947,12 +2256,18 @@ func (tx *Tx) CreateSpatialIndexOptions(name, pattern string,
 	return tx.createIndex(name, pattern, nil, rect, nil)
 }
 
+
+
 // createIndex is called by CreateIndex() and CreateSpatialIndex()
-func (tx *Tx) createIndex(name string, pattern string,
+func (tx *Tx) createIndex(
+	name string,									// index name
+	pattern string,									//
 	lessers []func(a, b string) bool,
 	rect func(item string) (min, max []float64),
 	opts *IndexOptions,
 ) error {
+
+
 	if tx.db == nil {
 		return ErrTxClosed
 	} else if !tx.writable {
@@ -1960,45 +2275,65 @@ func (tx *Tx) createIndex(name string, pattern string,
 	} else if tx.wc.itercount > 0 {
 		return ErrTxIterating
 	}
+
+
 	if name == "" {
 		// cannot create an index without a name.
 		// an empty name index is designated for the main "keys" tree.
 		return ErrIndexExists
 	}
+
+
 	// check if an index with that name already exists.
 	if _, ok := tx.db.idxs[name]; ok {
 		// index with name already exists. error.
 		return ErrIndexExists
 	}
+
 	// genreate a less function
 	var less func(a, b string) bool
+
+
 	switch len(lessers) {
 	default:
+
 		// multiple less functions specified.
 		// create a compound less function.
 		less = func(a, b string) bool {
+
 			for i := 0; i < len(lessers)-1; i++ {
+
 				if lessers[i](a, b) {
 					return true
 				}
+
 				if lessers[i](b, a) {
 					return false
 				}
 			}
+
 			return lessers[len(lessers)-1](a, b)
 		}
+
 	case 0:
 		// no less function
 	case 1:
 		less = lessers[0]
 	}
+
+
+
+
 	var sopts IndexOptions
 	if opts != nil {
 		sopts = *opts
 	}
+
 	if sopts.CaseInsensitiveKeyMatching {
 		pattern = strings.ToLower(pattern)
 	}
+
+
 	// intialize new index
 	idx := &index{
 		name:    name,
@@ -2008,7 +2343,12 @@ func (tx *Tx) createIndex(name string, pattern string,
 		db:      tx.db,
 		opts:    sopts,
 	}
+
+
+
 	idx.rebuild()
+
+
 	// save the index
 	tx.db.idxs[name] = idx
 	if tx.wc.rbkeys == nil {
@@ -2018,6 +2358,8 @@ func (tx *Tx) createIndex(name string, pattern string,
 			tx.wc.rollbackIndexes[name] = nil
 		}
 	}
+
+
 	return nil
 }
 
@@ -2054,42 +2396,54 @@ func (tx *Tx) DropIndex(name string) error {
 
 // Indexes returns a list of index names.
 func (tx *Tx) Indexes() ([]string, error) {
+
+
+
 	if tx.db == nil {
 		return nil, ErrTxClosed
 	}
+
+
 	names := make([]string, 0, len(tx.db.idxs))
+
 	for name := range tx.db.idxs {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
+
 	return names, nil
 }
 
-// Rect is helper function that returns a string representation
-// of a rect. IndexRect() is the reverse function and can be used
-// to generate a rect from a string.
+// Rect is helper function that returns a string representation of a rect.
+//
+// IndexRect() is the reverse function and can be used to generate a rect from a string.
 func Rect(min, max []float64) string {
-	r := grect.Rect{Min: min, Max: max}
+
+	r := grect.Rect{
+		Min: min,
+		Max: max,
+	}
+
 	return r.String()
 }
 
-// Point is a helper function that converts a series of float64s
-// to a rectangle for a spatial index.
+// Point is a helper function that converts a series of float64s to a rectangle for a spatial index.
 func Point(coords ...float64) string {
 	return Rect(coords, coords)
 }
 
 // IndexRect is a helper function that converts string to a rect.
-// Rect() is the reverse function and can be used to generate a string
-// from a rect.
+//
+// Rect() is the reverse function and can be used to generate a string from a rect.
 func IndexRect(a string) (min, max []float64) {
 	r := grect.Get(a)
 	return r.Min, r.Max
 }
 
 // IndexString is a helper function that return true if 'a' is less than 'b'.
-// This is a case-insensitive comparison. Use the IndexBinary() for comparing
-// case-sensitive strings.
+// This is a case-insensitive comparison.
+// Use the IndexBinary() for comparing case-sensitive strings.
 func IndexString(a, b string) bool {
 	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] >= 'A' && a[i] <= 'Z' {
@@ -2126,6 +2480,7 @@ func IndexString(a, b string) bool {
 	}
 	return len(a) < len(b)
 }
+
 
 // IndexBinary is a helper function that returns true if 'a' is less than 'b'.
 // This compares the raw binary of the string.
@@ -2167,9 +2522,12 @@ func IndexJSON(path string) func(a, b string) bool {
 	}
 }
 
-// IndexJSONCaseSensitive provides for the ability to create an index on
-// any JSON field.
+
+
+// IndexJSONCaseSensitive provides for the ability to create an index on any JSON field.
+//
 // When the field is a string, the comparison will be case-sensitive.
+//
 // It returns a helper function used by CreateIndex.
 func IndexJSONCaseSensitive(path string) func(a, b string) bool {
 	return func(a, b string) bool {
@@ -2177,7 +2535,11 @@ func IndexJSONCaseSensitive(path string) func(a, b string) bool {
 	}
 }
 
+
+
 // Desc is a helper function that changes the order of an index.
 func Desc(less func(a, b string) bool) func(a, b string) bool {
-	return func(a, b string) bool { return less(b, a) }
+	return func(a, b string) bool {
+		return less(b, a)
+	}
 }
