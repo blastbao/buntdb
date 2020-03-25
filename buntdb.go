@@ -70,9 +70,15 @@ type DB struct {
 
 	buf []byte // a buffer to write to
 
+
+	// keys is the main database holding all DB items ordered by key.
 	keys *btree.BTree // a tree of all item ordered by key
 
+
 	exps *btree.BTree // a tree of items ordered by expiration
+
+
+
 
 	idxs map[string]*index // the index trees.
 
@@ -141,11 +147,16 @@ type Config struct {
 	// has been expired.
 	OnExpired func(keys []string)
 
+
 	// OnExpiredSync will be called inside the same transaction that is performing
-	// the deletion of expired items. If OnExpired is present then this callback
-	// will not be called. If this callback is present, then the deletion of the
-	// timeed-out item is the explicit responsibility of this callback.
+	// the deletion of expired items.
+	//
+	// If OnExpired is present then this callback will not be called.
+	//
+	// If this callback is present, then the deletion of the timeed-out item
+	// is the explicit responsibility of this callback.
 	OnExpiredSync func(key, value string, tx *Tx) error
+
 }
 
 // exctx is a simple b-tree context for ordering by expiration.
@@ -247,6 +258,7 @@ func (db *DB) Close() error {
 // Database that persist to disk can be snapshotted by simply copying the database file.
 //
 func (db *DB) Save(wr io.Writer) error {
+
 	var err error
 
 	db.mu.RLock()
@@ -319,6 +331,7 @@ type index struct {
 	//
 	name    string                                 // name of the index
 
+
 	// Pattern specifies which keys the index takes effect on.
 	// You can create an index only for some keys of a specific pattern.
 	//
@@ -343,7 +356,6 @@ type index struct {
 // match matches the pattern to the key
 func (idx *index) match(key string) bool {
 
-	//
 	if idx.pattern == "*" {
 		return true
 	}
@@ -363,6 +375,8 @@ func (idx *index) match(key string) bool {
 
 
 // clearCopy creates a copy of the index, but with an empty dataset.
+//
+//
 func (idx *index) clearCopy() *index {
 
 	// copy the index meta information
@@ -567,101 +581,105 @@ func (db *DB) SetConfig(config Config) error {
 	return nil
 }
 
-// insertIntoDatabase performs inserts an item in to the database and updates
-// all indexes. If a previous item with the same key already exists, that item
-// will be replaced with the new one, and return the previous item.
+
+// insertIntoDatabase performs inserts an item in to the database and updates all indexes.
+//
+// If a previous item with the same key already exists,
+// that item will be replaced with the new one,
+// and return the previous item.
 func (db *DB) insertIntoDatabase(item *dbItem) *dbItem {
 
-
+	// previous item
 	var pdbi *dbItem
 
-
+	// replace or insert item into db.keys
 	prev := db.keys.ReplaceOrInsert(item)
 
-
+	// A previous item was removed from the keys tree.
+	// Let's fully delete this item from all indexes.
 	if prev != nil {
 
-		// A previous item was removed from the keys tree.
-		// Let's fully delete this item from all indexes.
 		pdbi = prev.(*dbItem)
+
+		// Remove it from the exipres tree
 		if pdbi.opts != nil && pdbi.opts.ex {
-
-			// Remove it from the exipres tree.
 			db.exps.Delete(pdbi)
-
 		}
 
-
+		// Remove it from each index in db.idxs
 		for _, idx := range db.idxs {
-
-
+			// Remove it from the btree index.
 			if idx.btr != nil {
-				// Remove it from the btree index.
 				idx.btr.Delete(pdbi)
 			}
-
-
+			// Remove it from the rtree index.
 			if idx.rtr != nil {
-				// Remove it from the rtree index.
 				idx.rtr.Remove(pdbi)
 			}
-
-
 		}
 	}
 
-
+	// If new item has eviction options, add it to the expires tree
 	if item.opts != nil && item.opts.ex {
-
-		// The new item has eviction options.
-		// Add it to the expires tree
 		db.exps.ReplaceOrInsert(item)
 	}
 
-
-
-
+	// check if item should be insert into some index
 	for _, idx := range db.idxs {
 
-
+		// check if item.key match idx.pattern
 		if !idx.match(item.key) {
 			continue
 		}
 
-
+		// add new item to btree index
 		if idx.btr != nil {
-			// Add new item to btree index.
 			idx.btr.ReplaceOrInsert(item)
 		}
 
-
+		// add new item to rtree index
 		if idx.rtr != nil {
-			// Add new item to rtree index.
 			idx.rtr.Insert(item)
 		}
 
 	}
+
 	// we must return the previous item to the caller.
 	return pdbi
 }
 
-// deleteFromDatabase removes and item from the database and indexes. The input
-// item must only have the key field specified thus "&dbItem{key: key}" is all
-// that is needed to fully remove the item with the matching key. If an item
-// with the matching key was found in the database, it will be removed and
-// returned to the caller. A nil return value means that the item was not
-// found in the database
+// deleteFromDatabase removes and item from the database and indexes.
+//
+// The input item must only have the key field specified thus "&dbItem{key: key}" is
+// all that is needed to fully remove the item with the matching key.
+//
+// If an item with the matching key was found in the database,
+// it will be removed and returned to the caller.
+//
+// A nil return value means that the item was not found in the database
 func (db *DB) deleteFromDatabase(item *dbItem) *dbItem {
+
 	var pdbi *dbItem
+
+
+	// 1. delete item from db.keys.
+	//
+	// if item was not found in the database, nil will be returned.
 	prev := db.keys.Delete(item)
+
+
+	// if item with same key exist before, then...
 	if prev != nil {
+
+
 		pdbi = prev.(*dbItem)
 
+		// 2. Remove it from the exipres tree.
 		if pdbi.opts != nil && pdbi.opts.ex {
-			// Remove it from the exipres tree.
 			db.exps.Delete(pdbi)
 		}
 
+		// 3. Remove it from the db.idxs.
 		for _, idx := range db.idxs {
 			if idx.btr != nil {
 				// Remove it from the btree index.
@@ -686,6 +704,7 @@ func (db *DB) backgroundManager() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 
+
 	for range t.C {
 
 		var shrink bool
@@ -693,7 +712,7 @@ func (db *DB) backgroundManager() {
 		// Open a standard view.
 		//
 		// This will take a full lock of the database thus allowing for access to anything we need.
-		//
+
 
 		var onExpired func([]string)
 
@@ -701,16 +720,20 @@ func (db *DB) backgroundManager() {
 
 		var onExpiredSync func(key, value string, tx *Tx) error
 
+
+
+
 		err := db.Update(func(tx *Tx) error {
 
+			//
 			onExpired = db.config.OnExpired
-
 			if onExpired == nil {
 				onExpiredSync = db.config.OnExpiredSync
 			}
 
+			// check if should shrink
 			if db.persist && !db.config.AutoShrinkDisabled {
-				pos, err := db.file.Seek(0, 1)
+				pos, err := db.file.Seek(0, 1) // get current offset
 				if err != nil {
 					return err
 				}
@@ -721,18 +744,35 @@ func (db *DB) backgroundManager() {
 				}
 			}
 
-			// produce a list of expired items that need removing
-			db.exps.AscendLessThan(&dbItem{
-				opts: &dbItemOpts{ex: true, exat: time.Now()},
-			}, func(item btree.Item) bool {
-				expired = append(expired, item.(*dbItem))
-				return true
-			})
 
+			// produce a list of expired items that need removing
+			db.exps.AscendLessThan(
+
+
+				&dbItem{
+					opts: &dbItemOpts{
+						ex: true,
+						exat: time.Now(),
+					},
+				},
+
+				func(item btree.Item) bool {
+					expired = append(expired, item.(*dbItem))
+					return true
+				},
+
+			)
+
+
+			//
 			if onExpired == nil && onExpiredSync == nil {
 
+
+				//
 				for _, itm := range expired {
 
+
+					//
 					if _, err := tx.Delete(itm.key); err != nil {
 
 						// it's ok to get a "not found" because the
@@ -747,22 +787,22 @@ func (db *DB) backgroundManager() {
 				}
 
 			} else if onExpiredSync != nil {
-
 				for _, itm := range expired {
-
 					if err := onExpiredSync(itm.key, itm.val, tx); err != nil {
 						return err
 					}
-
 				}
-
 			}
+
+
 			return nil
 		})
+
 
 		if err == ErrDatabaseClosed {
 			break
 		}
+
 
 		// send expired event, if needed
 		if onExpired != nil && len(expired) > 0 {
@@ -775,6 +815,7 @@ func (db *DB) backgroundManager() {
 
 			onExpired(keys)
 		}
+
 
 		// execute a disk sync, if needed
 		func() {
@@ -790,54 +831,56 @@ func (db *DB) backgroundManager() {
 
 		}()
 
+
 		if shrink {
-
 			if err = db.Shrink(); err != nil {
-
 				if err == ErrDatabaseClosed {
 					break
 				}
-
 			}
-
 		}
 	}
 }
 
-// Shrink will make the database file smaller by removing redundant
-// log entries. This operation does not block the database.
+// Shrink will make the database file smaller by removing redundant log entries.
+//
+// This operation does not block the database.
+//
 func (db *DB) Shrink() error {
 
 	db.mu.Lock()
-
 	if db.closed {
 		db.mu.Unlock()
 		return ErrDatabaseClosed
 	}
 
+	// The database was opened with ":memory:" as the path.
+	// There is no persistence, and no need to do anything here.
 	if !db.persist {
-		// The database was opened with ":memory:" as the path.
-		// There is no persistence, and no need to do anything here.
 		db.mu.Unlock()
 		return nil
 	}
 
+	// The database is already in the process of shrinking.
 	if db.shrinking {
-		// The database is already in the process of shrinking.
 		db.mu.Unlock()
 		return ErrShrinkInProcess
 	}
 
+	// Set shrinking state
 	db.shrinking = true
 
+	// Reset shrinking state
 	defer func() {
 		db.mu.Lock()
 		db.shrinking = false
 		db.mu.Unlock()
 	}()
 
+
 	fname := db.file.Name()
 	tmpname := fname + ".tmp"
+
 
 	// the endpos is used to return to the end of the file when we are
 	// finished writing all of the current items.
@@ -847,12 +890,16 @@ func (db *DB) Shrink() error {
 	}
 
 	db.mu.Unlock()
-	time.Sleep(time.Second / 4) // wait just a bit before starting
+
+	// wait just a bit before starting
+	time.Sleep(time.Second / 4)
+
+	// Create a tmp file for shrinking
 	f, err := os.Create(tmpname)
 	if err != nil {
 		return err
 	}
-
+	// Close and delete the tmp file
 	defer func() {
 		_ = f.Close()
 		_ = os.RemoveAll(tmpname)
@@ -860,43 +907,69 @@ func (db *DB) Shrink() error {
 
 	// we are going to read items in as chunks as to not hold up the database for too long.
 	var buf []byte
+
 	pivot := ""
+
 	done := false
 	for !done {
+
 		err := func() error {
+
 			db.mu.RLock()
 			defer db.mu.RUnlock()
+
 			if db.closed {
 				return ErrDatabaseClosed
 			}
+
 			done = true
+
 			var n int
-			db.keys.AscendGreaterOrEqual(&dbItem{key: pivot},
+
+			// traverse the db.keys, apply func() to any key equal or greater than pivot("").
+
+
+			db.keys.AscendGreaterOrEqual(
+
+				&dbItem{
+					key: pivot,
+				},
+
 				func(item btree.Item) bool {
+
 					dbi := item.(*dbItem)
+
 					// 1000 items or 64MB buffer
 					if n > 1000 || len(buf) > 64*1024*1024 {
 						pivot = dbi.key
 						done = false
 						return false
 					}
+
 					buf = dbi.writeSetTo(buf)
 					n++
 					return true
 				},
 			)
+
+
 			if len(buf) > 0 {
 				if _, err := f.Write(buf); err != nil {
 					return err
 				}
 				buf = buf[:0]
 			}
+
+
 			return nil
 		}()
+
 		if err != nil {
 			return err
 		}
+
 	}
+
 
 	// We reached this far so all of the items have been written to a new tmp
 	// There's some more work to do by appending the new line from the aof
@@ -906,51 +979,66 @@ func (db *DB) Shrink() error {
 		// We're wrapping this in a function to get the benefit of a defered lock/unlock.
 		db.mu.Lock()
 		defer db.mu.Unlock()
+
 		if db.closed {
 			return ErrDatabaseClosed
 		}
+
 		// We are going to open a new version of the aof file so that we do
-		// not change the seek position of the previous. This may cause a
-		// problem in the future if we choose to use syscall file locking.
+		// not change the seek position of the previous.
+		//
+		// This may cause a problem in the future if we choose to use syscall file locking.
+
 		aof, err := os.Open(fname)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = aof.Close() }()
+
+		defer func() {
+			_ = aof.Close()
+		}()
+
+
 		if _, err := aof.Seek(endpos, 0); err != nil {
 			return err
 		}
-		// Just copy all of the new commands that have occurred since we
-		// started the shrink process.
+
+		// Just copy all of the new commands that have occurred since we started the shrink process.
 		if _, err := io.Copy(f, aof); err != nil {
 			return err
 		}
+
 		// Close all files
 		if err := aof.Close(); err != nil {
 			return err
 		}
+
 		if err := f.Close(); err != nil {
 			return err
 		}
+
 		if err := db.file.Close(); err != nil {
 			return err
 		}
+
 		// Any failures below here is really bad. So just panic.
 		if err := os.Rename(tmpname, fname); err != nil {
 			panic(err)
 		}
+
 		db.file, err = os.OpenFile(fname, os.O_CREATE|os.O_RDWR, 0666)
 		if err != nil {
 			panic(err)
 		}
+
 		pos, err := db.file.Seek(0, 2)
 		if err != nil {
 			return err
 		}
+
 		db.lastaofsz = int(pos)
 		return nil
 	}()
-
 }
 
 var errValidEOF = errors.New("valid eof")
@@ -959,13 +1047,17 @@ var errValidEOF = errors.New("valid eof")
 // modTime is the modified time of the reader, should be no greater than
 // the current time.Now().
 func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
+
 	data := make([]byte, 4096)
 	parts := make([]string, 0, 8)
 	r := bufio.NewReader(rd)
+
 	for {
+
 		// read a single command.
 		// first we should read the number of parts that the of the command
 		line, err := r.ReadBytes('\n')
+
 		if err != nil {
 			if len(line) > 0 {
 				// got an eof but also data. this should be an unexpected eof.
@@ -976,9 +1068,11 @@ func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
 			}
 			return err
 		}
+
 		if line[0] != '*' {
 			return ErrInvalid
 		}
+
 		// convert the string number to and int
 		var n int
 		if len(line) == 4 && line[len(line)-2] == '\r' {
@@ -997,17 +1091,21 @@ func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
 				n = n*10 + int(line[i]-'0')
 			}
 		}
+
 		// read each part of the command.
 		parts = parts[:0]
 		for i := 0; i < n; i++ {
+
 			// read the number of bytes of the part.
 			line, err := r.ReadBytes('\n')
 			if err != nil {
 				return err
 			}
+
 			if line[0] != '$' {
 				return ErrInvalid
 			}
+
 			// convert the string number to and int
 			var n int
 			if len(line) == 4 && line[len(line)-2] == '\r' {
@@ -1026,6 +1124,7 @@ func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
 					n = n*10 + int(line[i]-'0')
 				}
 			}
+
 			// resize the read buffer
 			if len(data) < n+2 {
 				dataln := len(data)
@@ -1034,35 +1133,47 @@ func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
 				}
 				data = make([]byte, dataln)
 			}
+
 			if _, err = io.ReadFull(r, data[:n+2]); err != nil {
 				return err
 			}
+
 			if data[n] != '\r' || data[n+1] != '\n' {
 				return ErrInvalid
 			}
+
 			// copy string
 			parts = append(parts, string(data[:n]))
-		}
-		// finished reading the command
 
+		}
+
+
+		// finished reading the command
 		if len(parts) == 0 {
 			continue
 		}
+
+
 		if (parts[0][0] == 's' || parts[0][0] == 'S') &&
-			(parts[0][1] == 'e' || parts[0][1] == 'E') &&
-			(parts[0][2] == 't' || parts[0][2] == 'T') {
+		   (parts[0][1] == 'e' || parts[0][1] == 'E') &&
+		   (parts[0][2] == 't' || parts[0][2] == 'T') {
+
 			// SET
 			if len(parts) < 3 || len(parts) == 4 || len(parts) > 5 {
 				return ErrInvalid
 			}
+
 			if len(parts) == 5 {
+
 				if strings.ToLower(parts[3]) != "ex" {
 					return ErrInvalid
 				}
+
 				ex, err := strconv.ParseInt(parts[4], 10, 64)
 				if err != nil {
 					return err
 				}
+
 				now := time.Now()
 				dur := (time.Duration(ex) * time.Second) - now.Sub(modTime)
 				if dur > 0 {
@@ -1075,26 +1186,34 @@ func (db *DB) readLoad(rd io.Reader, modTime time.Time) error {
 						},
 					})
 				}
+
 			} else {
 				db.insertIntoDatabase(&dbItem{key: parts[1], val: parts[2]})
 			}
+
 		} else if (parts[0][0] == 'd' || parts[0][0] == 'D') &&
 			(parts[0][1] == 'e' || parts[0][1] == 'E') &&
 			(parts[0][2] == 'l' || parts[0][2] == 'L') {
+
 			// DEL
 			if len(parts) != 2 {
 				return ErrInvalid
 			}
 			db.deleteFromDatabase(&dbItem{key: parts[1]})
+
 		} else if (parts[0][0] == 'f' || parts[0][0] == 'F') &&
 			strings.ToLower(parts[0]) == "flushdb" {
 			db.keys = btree.New(btreeDegrees, nil)
 			db.exps = btree.New(btreeDegrees, &exctx{db})
 			db.idxs = make(map[string]*index)
 		} else {
+
 			return ErrInvalid
+
 		}
 	}
+
+
 	return nil
 }
 
@@ -1133,17 +1252,21 @@ func (db *DB) managed(writable bool, fn func(tx *Tx) error) (err error) {
 
 	var tx *Tx
 
+	// new a transaction object and init it
 	tx, err = db.Begin(writable)
 	if err != nil {
 		return
 	}
 
 	defer func() {
+
 		if err != nil {
 			// The caller returned an error. We must rollback.
 			_ = tx.Rollback()
 			return
 		}
+
+
 		if writable {
 			// Everything went well. Lets Commit()
 			err = tx.Commit()
@@ -1151,6 +1274,8 @@ func (db *DB) managed(writable bool, fn func(tx *Tx) error) (err error) {
 			// read-only transaction can only roll back.
 			err = tx.Rollback()
 		}
+
+
 	}()
 
 	tx.funcd = true
@@ -1163,11 +1288,9 @@ func (db *DB) managed(writable bool, fn func(tx *Tx) error) (err error) {
 }
 
 // View executes a function within a managed read-only transaction.
-// When a non-nil error is returned from the function that error will be return
-// to the caller of View().
+// When a non-nil error is returned from the function that error will be return to the caller of View().
 //
-// Executing a manual commit or rollback from inside the function will result
-// in a panic.
+// Executing a manual commit or rollback from inside the function will result in a panic.
 func (db *DB) View(fn func(tx *Tx) error) error {
 	return db.managed(false, fn)
 }
@@ -1186,6 +1309,7 @@ func (db *DB) Update(fn func(tx *Tx) error) error {
 
 // get return an item or nil if not found.
 func (db *DB) get(key string) *dbItem {
+	// looks for the key item in the btree.
 	item := db.keys.Get(&dbItem{key: key})
 	if item != nil {
 		return item.(*dbItem)
@@ -1238,20 +1362,23 @@ func (tx *Tx) DeleteAll() error {
 		return ErrTxIterating
 	}
 
-	// check to see if we've already deleted everything
+	// check to see if we've already deleted everything.
+	//
+	// there can be many DeleteAll() calls in one transaction, we should only backup the origin snapshot.
+	//
+	// if tx.wc.rbkeys == nil, means original snapshot has been saved.
 	if tx.wc.rbkeys == nil {
-
 		// we need to backup the live data in case of a rollback.
 		tx.wc.rbkeys = tx.db.keys
 		tx.wc.rbexps = tx.db.exps
 		tx.wc.rbidxs = tx.db.idxs
-
 	}
 
 	// now reset the live database trees
 	tx.db.keys = btree.New(btreeDegrees, nil)
 	tx.db.exps = btree.New(btreeDegrees, &exctx{tx.db})
 	tx.db.idxs = make(map[string]*index)
+
 
 	// finally re-create the indexes
 	for name, idx := range tx.wc.rbidxs {
@@ -1332,32 +1459,53 @@ func (tx *Tx) rollbackInner() {
 
 
 	// rollback the deleteAll if needed
+	//
+	// if tx.wc.rbkeys != nil, means a DeleteAll() has been called in tx,
+	// rollback should recover those core indexes first.
 	if tx.wc.rbkeys != nil {
-
 		tx.db.keys = tx.wc.rbkeys
 		tx.db.idxs = tx.wc.rbidxs
 		tx.db.exps = tx.wc.rbexps
-
 	}
 
 
+	// tx.wc.rollbackItems holds the keys have been changed in tx with their previous value,
+	// those keys have been insert to database currently, so rollback should delete them first,
+	// then reinsert with previous value.
 	for key, item := range tx.wc.rollbackItems {
-		tx.db.deleteFromDatabase(&dbItem{key: key})
+
+		// 1. delete key
+		tx.db.deleteFromDatabase(
+			&dbItem{
+				key: key,
+			},
+		)
+
+		// 2. reinsert key with previous value
+		//
+		// When an item is not nil, we will need to reinsert that item
+		// into the database with old value overwriting the current one.
 		if item != nil {
-			// When an item is not nil, we will need to reinsert that item
-			// into the database overwriting the current one.
 			tx.db.insertIntoDatabase(item)
 		}
 	}
 
-
+	// tx.wc.rollbackIndexes holds the indexes have been deleted in tx,
+	// those keys have been insert to database currently, so rollback should delete them first,
+	// then reinsert with previous value.
 	for name, idx := range tx.wc.rollbackIndexes {
+		// 1. delete index
 		delete(tx.db.idxs, name)
+		// 2. reinsert index with previous value then rebuild it
 		if idx != nil {
-			// When an index is not nil, we will need to rebuilt that index
+
+			// [attention]
+			// When an index is not nil, we need rebuilt the index.
 			// this could be an expensive process if the database has many
 			// items or the index is complex.
 			tx.db.idxs[name] = idx
+
+			//
 			idx.rebuild()
 		}
 	}
@@ -1370,7 +1518,7 @@ func (tx *Tx) rollbackInner() {
 // from a read-only transaction.
 func (tx *Tx) Commit() error {
 
-
+	// tx.funcd is true means there is a function executing in tx, so cannot commit.
 	if tx.funcd {
 		panic("managed tx commit not allowed")
 	}
@@ -1384,6 +1532,15 @@ func (tx *Tx) Commit() error {
 
 
 	var err error
+
+
+
+	// the is condition means:
+	//
+	//  1. tx.db.persist 				=> should sync tx.db to disk.
+	//  2. (len(tx.wc.commitItems) > 0  => there are items should save in disk
+	//  3. tx.wc.rbkeys != nil 			=> a DeleteAll() was called in current tx,
+
 	if tx.db.persist && (len(tx.wc.commitItems) > 0 || tx.wc.rbkeys != nil) {
 
 		tx.db.buf = tx.db.buf[:0]
@@ -1393,10 +1550,16 @@ func (tx *Tx) Commit() error {
 			tx.db.buf = append(tx.db.buf, "*1\r\n$7\r\nflushdb\r\n"...)
 		}
 
+		// tx.wc.commitItems save the entries waiting for writing to disk after commit.
+		// so, now we traverse the map and append each item to tx.db.buf .
+		//
 		// Each committed record is written to disk
 		for key, item := range tx.wc.commitItems {
+
+			// if item is nil, means the key is delete from tx.db, so write a delete record.
 			if item == nil {
 				tx.db.buf = (&dbItem{key: key}).writeDeleteTo(tx.db.buf)
+			// else, write a set record.
 			} else {
 				tx.db.buf = item.writeSetTo(tx.db.buf)
 			}
@@ -1404,20 +1567,19 @@ func (tx *Tx) Commit() error {
 
 
 		// Flushing the buffer only once per transaction.
+		//
 		// If this operation fails then the write did failed and we must rollback.
 		if _, err = tx.db.file.Write(tx.db.buf); err != nil {
 			tx.rollbackInner()
 		}
 
-
+		// Check if should sync io buffered data to disk.
 		if tx.db.config.SyncPolicy == Always {
 			_ = tx.db.file.Sync()
 		}
 
-
 		// Increment the number of flushes. The background syncing uses this.
 		tx.db.flushes++
-
 
 	}
 
@@ -1426,9 +1588,8 @@ func (tx *Tx) Commit() error {
 	tx.unlock()
 
 
-	// Clear the db field to disable this transaction from future use.
+	// Clear the db field to disable this transaction from future use, meanwhile enable gc collect unused objects earlier.
 	tx.db = nil
-
 
 	return err
 }
@@ -1442,6 +1603,7 @@ func (tx *Tx) Commit() error {
 // Read-only transactions can only be rolled back, not committed.
 func (tx *Tx) Rollback() error {
 
+	// tx.funcd is true means there is a function executing in tx, so cannot rollback.
 	if tx.funcd {
 		panic("managed tx rollback not allowed")
 	}
@@ -1616,26 +1778,36 @@ func (dbi *dbItem) Rect(ctx interface{}) (min, max []float64) {
 
 // SetOptions represents options that may be included with the Set() command.
 type SetOptions struct {
+
 	// Expires indicates that the Set() key-value will expire
 	Expires bool
-	// TTL is how much time the key-value will exist in the database
-	// before being evicted. The Expires field must also be set to true.
+
+
+
+	// TTL is how much time the key-value will exist in the database before being evicted.
+	// The Expires field must also be set to true.
+	//
 	// TTL stands for Time-To-Live.
 	TTL time.Duration
 }
 
 // GetLess returns the less function for an index. This is handy for
 // doing ad-hoc compares inside a transaction.
+//
 // Returns ErrNotFound if the index is not found or there is no less
 // function bound to the index
 func (tx *Tx) GetLess(index string) (func(a, b string) bool, error) {
+
 	if tx.db == nil {
 		return nil, ErrTxClosed
 	}
+
 	idx, ok := tx.db.idxs[index]
+
 	if !ok || idx.less == nil {
 		return nil, ErrNotFound
 	}
+
 	return idx.less, nil
 }
 
@@ -1656,18 +1828,23 @@ func (tx *Tx) GetRect(index string) (func(s string) (min, max []float64),
 }
 
 // Set inserts or replaces an item in the database based on the key.
+//
 // The opt params may be used for additional functionality such as forcing
-// the item to be evicted at a specified time. When the return value
-// for err is nil the operation succeeded. When the return value of
-// replaced is true, then the operaton replaced an existing item whose
-// value will be returned through the previousValue variable.
+// the item to be evicted at a specified time.
+//
+// When the return value for err is nil the operation succeeded.
+// When the return value of replaced is true, then the operaton replaced an
+// existing item whose value will be returned through the previousValue variable.
+//
+//
 // The results of this operation will not be available to other
 // transactions until the current transaction has successfully committed.
 //
 // Only a writable transaction can be used with this operation.
 // This operation is not allowed during iterations such as Ascend* & Descend*.
-func (tx *Tx) Set(key, value string, opts *SetOptions) (previousValue string,
-	replaced bool, err error) {
+func (tx *Tx) Set(key, value string, opts *SetOptions) (previousValue string, replaced bool, err error) {
+
+
 	if tx.db == nil {
 		return "", false, ErrTxClosed
 	} else if !tx.writable {
@@ -1675,63 +1852,101 @@ func (tx *Tx) Set(key, value string, opts *SetOptions) (previousValue string,
 	} else if tx.wc.itercount > 0 {
 		return "", false, ErrTxIterating
 	}
-	item := &dbItem{key: key, val: value}
+
+	// build a db item
+	item := &dbItem{
+		key: key,
+		val: value,
+	}
+
+	// set expiration option
 	if opts != nil {
 		if opts.Expires {
-			// The caller is requesting that this item expires. Convert the
-			// TTL to an absolute time and bind it to the item.
-			item.opts = &dbItemOpts{ex: true, exat: time.Now().Add(opts.TTL)}
+			// The caller is requesting that this item expires.
+			// Convert the TTL to an absolute time and bind it to the item.
+			item.opts = &dbItemOpts{
+				ex: true,
+				exat: time.Now().Add(opts.TTL),
+			}
 		}
 	}
+
 	// Insert the item into the keys tree.
+	//
+	// If a previous item with the same key already exists,
+	// that item will be replaced with the new one, and return the previous item.
 	prev := tx.db.insertIntoDatabase(item)
+
+
 
 	// insert into the rollback map if there has not been a deleteAll.
 	if tx.wc.rbkeys == nil {
+
 		if prev == nil {
-			// An item with the same key did not previously exist. Let's
-			// create a rollback entry with a nil value. A nil value indicates
-			// that the entry should be deleted on rollback. When the value is
-			// *not* nil, that means the entry should be reverted.
+
+			// An item with the same key did not exist previously.
+			//
+			// Let's create a rollback entry with a nil value.
+			//
+			// A nil value indicates that the entry should be deleted on rollback.
+			//
+			// When the value is *not* nil, that means the entry should be reverted.
 			tx.wc.rollbackItems[key] = nil
+
 		} else {
-			// A previous item already exists in the database. Let's create a
-			// rollback entry with the item as the value. We need to check the
-			// map to see if there isn't already an item that matches the
-			// same key.
+
+			// A previous item already exists in the database.
+			//
+			// Let's create a rollback entry with the item as the value.
+			//
+			// We need to check the map to see if there isn't already an item that matches the same key.
 			if _, ok := tx.wc.rollbackItems[key]; !ok {
 				tx.wc.rollbackItems[key] = prev
 			}
+
+			//
 			if !prev.expired() {
-				previousValue, replaced = prev.val, true
+				previousValue = prev.val
+				replaced = true
 			}
+
 		}
 	}
-	// For commits we simply assign the item to the map. We use this map to
-	// write the entry to disk.
+
+
+	// For commits we simply assign the item to the map.
+	//
+	// We use this map to write the entry to disk.
 	if tx.db.persist {
 		tx.wc.commitItems[key] = item
 	}
+
 	return previousValue, replaced, nil
 }
 
-// Get returns a value for a key. If the item does not exist or if the item
-// has expired then ErrNotFound is returned. If ignoreExpired is true, then
-// the found value will be returned even if it is expired.
+// Get returns a value for a key.
+//
+// If the item does not exist or if the item has expired then ErrNotFound is returned.
+// If ignoreExpired is true, then the found value will be returned even if it is expired.
 func (tx *Tx) Get(key string, ignoreExpired ...bool) (val string, err error) {
+
 	if tx.db == nil {
 		return "", ErrTxClosed
 	}
+
 	var ignore bool
 	if len(ignoreExpired) != 0 {
 		ignore = ignoreExpired[0]
 	}
+
 	item := tx.db.get(key)
 	if item == nil || (item.expired() && !ignore) {
-		// The item does not exists or has expired. Let's assume that
-		// the caller is only interested in items that have not expired.
+		// The item does not exists or has expired.
+		//
+		// Let's assume that the caller is only interested in items that have not expired.
 		return "", ErrNotFound
 	}
+
 	return item.val, nil
 }
 
@@ -1741,6 +1956,7 @@ func (tx *Tx) Get(key string, ignoreExpired ...bool) (val string, err error) {
 // Only a writable transaction can be used for this operation.
 // This operation is not allowed during iterations such as Ascend* & Descend*.
 func (tx *Tx) Delete(key string) (val string, err error) {
+
 	if tx.db == nil {
 		return "", ErrTxClosed
 	} else if !tx.writable {
@@ -1748,69 +1964,93 @@ func (tx *Tx) Delete(key string) (val string, err error) {
 	} else if tx.wc.itercount > 0 {
 		return "", ErrTxIterating
 	}
+
+	//
 	item := tx.db.deleteFromDatabase(&dbItem{key: key})
 	if item == nil {
 		return "", ErrNotFound
 	}
+
 	// create a rollback entry if there has not been a deleteAll call.
 	if tx.wc.rbkeys == nil {
 		if _, ok := tx.wc.rollbackItems[key]; !ok {
 			tx.wc.rollbackItems[key] = item
 		}
 	}
+
+
+	// tx.wc.commitItems save the entries waiting for writing to disk after commit.
+	// so, when key is delete from tx.db, it should also be removed from this map.
+	//
+	// We use this map to write the entry to disk.
 	if tx.db.persist {
 		tx.wc.commitItems[key] = nil
 	}
-	// Even though the item has been deleted, we still want to check
-	// if it has expired. An expired item should not be returned.
+
+
+	// Even though the item has been deleted, we still want to check if it has expired.
+	// An expired item should not be returned.
 	if item.expired() {
-		// The item exists in the tree, but has expired. Let's assume that
-		// the caller is only interested in items that have not expired.
+		// The item exists in the tree, but has expired.
+		// Let's assume that the caller is only interested in items that have not expired.
 		return "", ErrNotFound
 	}
+
 	return item.val, nil
 }
 
 // TTL returns the remaining time-to-live for an item.
-// A negative duration will be returned for items that do not have an
-// expiration.
+// A negative duration will be returned for items that do not have an expiration.
 func (tx *Tx) TTL(key string) (time.Duration, error) {
+
 	if tx.db == nil {
 		return 0, ErrTxClosed
 	}
+
 	item := tx.db.get(key)
 	if item == nil {
 		return 0, ErrNotFound
 	} else if item.opts == nil || !item.opts.ex {
 		return -1, nil
 	}
+
 	dur := item.opts.exat.Sub(time.Now())
 	if dur < 0 {
 		return 0, ErrNotFound
 	}
+
 	return dur, nil
 }
 
 // scan iterates through a specified index and calls user-defined iterator
 // function for each item encountered.
+//
+//
 // The desc param indicates that the iterator should descend.
+//
 // The gt param indicates that there is a greaterThan limit.
 // The lt param indicates that there is a lessThan limit.
-// The index param tells the scanner to use the specified index tree. An
-// empty string for the index means to scan the keys, not the values.
-// The start and stop params are the greaterThan, lessThan limits. For
-// descending order, these will be lessThan, greaterThan.
+//
+// The index param tells the scanner to use the specified index tree.
+// An empty string for the index means to scan the keys, not the values.
+//
+// The start and stop params are the greaterThan, lessThan limits.
+// For descending order, these will be lessThan, greaterThan.
+//
 // An error will be returned if the tx is closed or the index is not found.
-func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string,
-	iterator func(key, value string) bool) error {
+func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string, iterator func(key, value string) bool) error {
+
 	if tx.db == nil {
 		return ErrTxClosed
 	}
+
 	// wrap a btree specific iterator around the user-defined iterator.
 	iter := func(item btree.Item) bool {
 		dbi := item.(*dbItem)
 		return iterator(dbi.key, dbi.val)
 	}
+
+
 	var tr *btree.BTree
 	if index == "" {
 		// empty index means we will use the keys tree.
@@ -1826,6 +2066,8 @@ func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string,
 			return nil
 		}
 	}
+
+
 	// create some limit items
 	var itemA, itemB *dbItem
 	if gt || lt {
@@ -1841,6 +2083,8 @@ func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string,
 			}
 		}
 	}
+
+
 	// execute the scan on the underlying tree.
 	if tx.wc != nil {
 		tx.wc.itercount++
@@ -1848,19 +2092,26 @@ func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string,
 			tx.wc.itercount--
 		}()
 	}
+
+
 	if desc {
+
 		if gt {
+
 			if lt {
 				tr.DescendRange(itemA, itemB, iter)
 			} else {
 				tr.DescendGreaterThan(itemA, iter)
 			}
+
 		} else if lt {
 			tr.DescendLessOrEqual(itemA, iter)
 		} else {
 			tr.Descend(iter)
 		}
+
 	} else {
+
 		if gt {
 			if lt {
 				tr.AscendRange(itemA, itemB, iter)
@@ -1872,60 +2123,85 @@ func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string,
 		} else {
 			tr.Ascend(iter)
 		}
+
 	}
+
+
+
 	return nil
 }
 
-// Match returns true if the specified key matches the pattern. This is a very
-// simple pattern matcher where '*' matches on any number characters and '?'
-// matches on any one character.
+// Match returns true if the specified key matches the pattern.
+//
+// This is a very simple pattern matcher where '*' matches on any number
+// characters and '?' matches on any one character.
+//
 func Match(key, pattern string) bool {
 	return match.Match(key, pattern)
 }
 
 // AscendKeys allows for iterating through keys based on the specified pattern.
-func (tx *Tx) AscendKeys(pattern string,
-	iterator func(key, value string) bool) error {
+func (tx *Tx) AscendKeys(pattern string, iterator func(key, value string) bool) error {
+
 	if pattern == "" {
 		return nil
 	}
+
+
 	if pattern[0] == '*' {
+
 		if pattern == "*" {
 			return tx.Ascend("", iterator)
 		}
-		return tx.Ascend("", func(key, value string) bool {
+
+		return tx.Ascend(
+			"",
+			func(key, value string) bool {
+				if match.Match(key, pattern) {
+					if !iterator(key, value) {
+						return false
+					}
+				}
+				return true
+			},
+		)
+	}
+
+
+	min, max := match.Allowable(pattern)
+	return tx.AscendGreaterOrEqual(
+		"",
+		min,
+		func(key, value string) bool {
+
+			if key > max {
+				return false
+			}
+
 			if match.Match(key, pattern) {
 				if !iterator(key, value) {
 					return false
 				}
 			}
+
 			return true
-		})
-	}
-	min, max := match.Allowable(pattern)
-	return tx.AscendGreaterOrEqual("", min, func(key, value string) bool {
-		if key > max {
-			return false
-		}
-		if match.Match(key, pattern) {
-			if !iterator(key, value) {
-				return false
-			}
-		}
-		return true
-	})
+		},
+	)
 }
 
 // DescendKeys allows for iterating through keys based on the specified pattern.
-func (tx *Tx) DescendKeys(pattern string,
-	iterator func(key, value string) bool) error {
+func (tx *Tx) DescendKeys(pattern string, iterator func(key, value string) bool) error {
+
 	if pattern == "" {
 		return nil
 	}
+
 	if pattern[0] == '*' {
+
 		if pattern == "*" {
 			return tx.Descend("", iterator)
 		}
+
 		return tx.Descend("", func(key, value string) bool {
 			if match.Match(key, pattern) {
 				if !iterator(key, value) {
@@ -1935,24 +2211,33 @@ func (tx *Tx) DescendKeys(pattern string,
 			return true
 		})
 	}
+
 	min, max := match.Allowable(pattern)
-	return tx.DescendLessOrEqual("", max, func(key, value string) bool {
-		if key < min {
-			return false
-		}
-		if match.Match(key, pattern) {
-			if !iterator(key, value) {
+	return tx.DescendLessOrEqual(
+		"",
+		max,
+		func(key, value string) bool {
+			if key < min {
 				return false
 			}
-		}
-		return true
-	})
+			if match.Match(key, pattern) {
+				if !iterator(key, value) {
+					return false
+				}
+			}
+			return true
+		},
+	)
 }
+
+
 
 // Ascend calls the iterator for every item in the database within the range
 // [first, last], until iterator returns false.
+//
 // When an index is provided, the results will be ordered by the item values
 // as specified by the less() function of the defined index.
+//
 // When an index is not provided, the results will be ordered by the item key.
 // An invalid index will return an error.
 func (tx *Tx) Ascend(index string,
@@ -1960,12 +2245,16 @@ func (tx *Tx) Ascend(index string,
 	return tx.scan(false, false, false, index, "", "", iterator)
 }
 
+
 // AscendGreaterOrEqual calls the iterator for every item in the database within
 // the range [pivot, last], until iterator returns false.
+//
 // When an index is provided, the results will be ordered by the item values
 // as specified by the less() function of the defined index.
+//
 // When an index is not provided, the results will be ordered by the item key.
 // An invalid index will return an error.
+//
 func (tx *Tx) AscendGreaterOrEqual(index, pivot string,
 	iterator func(key, value string) bool) error {
 	return tx.scan(false, true, false, index, pivot, "", iterator)
@@ -2075,26 +2364,31 @@ func (tx *Tx) AscendEqual(index, pivot string,
 // as specified by the less() function of the defined index.
 // When an index is not provided, the results will be ordered by the item key.
 // An invalid index will return an error.
-func (tx *Tx) DescendEqual(index, pivot string,
-	iterator func(key, value string) bool) error {
+func (tx *Tx) DescendEqual(index, pivot string, iterator func(key, value string) bool) error {
 	var err error
 	var less func(a, b string) bool
+
 	if index != "" {
 		less, err = tx.GetLess(index)
 		if err != nil {
 			return err
 		}
 	}
-	return tx.DescendLessOrEqual(index, pivot, func(key, value string) bool {
-		if less == nil {
-			if key != pivot {
+
+	return tx.DescendLessOrEqual(
+		index,
+		pivot,
+		func(key, value string) bool {
+			if less == nil {
+				if key != pivot {
+					return false
+				}
+			} else if less(value, pivot) {
 				return false
 			}
-		} else if less(value, pivot) {
-			return false
-		}
-		return iterator(key, value)
-	})
+			return iterator(key, value)
+		},
+	)
 }
 
 // rect is used by Intersects and Nearby
@@ -2351,6 +2645,8 @@ func (tx *Tx) createIndex(
 
 	// save the index
 	tx.db.idxs[name] = idx
+
+	//
 	if tx.wc.rbkeys == nil {
 		// store the index in the rollback map.
 		if _, ok := tx.wc.rollbackIndexes[name]; !ok {
@@ -2365,6 +2661,8 @@ func (tx *Tx) createIndex(
 
 // DropIndex removes an index.
 func (tx *Tx) DropIndex(name string) error {
+
+
 	if tx.db == nil {
 		return ErrTxClosed
 	} else if !tx.writable {
@@ -2372,25 +2670,32 @@ func (tx *Tx) DropIndex(name string) error {
 	} else if tx.wc.itercount > 0 {
 		return ErrTxIterating
 	}
+
 	if name == "" {
 		// cannot drop the default "keys" index
 		return ErrInvalidOperation
 	}
+
 	idx, ok := tx.db.idxs[name]
 	if !ok {
 		return ErrNotFound
 	}
+
 	// delete from the map.
 	// this is all that is needed to delete an index.
 	delete(tx.db.idxs, name)
+
+
+	//
 	if tx.wc.rbkeys == nil {
 		// store the index in the rollback map.
 		if _, ok := tx.wc.rollbackIndexes[name]; !ok {
-			// we use a non-nil copy of the index without the data to indicate that the
-			// index should be rebuilt upon rollback.
+			// we use a non-nil copy of the index without the data to
+			// indicate that the index should be rebuilt upon rollback.
 			tx.wc.rollbackIndexes[name] = idx.clearCopy()
 		}
 	}
+
 	return nil
 }
 
