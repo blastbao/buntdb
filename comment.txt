@@ -1,0 +1,13 @@
+
+
+
+问题：在 tx.rollbackInner 中，回滚 tx.wc.rollbackIndexes 的地方，需要调用 idx.rebuild() 重建索引？
+答案：
+
+因为在事务 tx 中，可能会调用 Delete(key) 和 DropIndex(name) ，
+在 Delete(key) 中会将 key 从某些 idx 中移除，而 DropIndex(name) 会先将被 drop 的 index 缓存到 rollbackIndexes 中。
+
+因为 Delete(key) 和 DropIndex(name)  调用顺序是不确定的，比如先 Delete(keyX) 后 DropIndex(indexY)，那么回滚之后，indexY中就缺少了keyX。
+
+当然，如果有日志记录下 Delete 和 DropIndex 的流水，则可以梳理出每个 key 的变更历史，从而能够在回滚时逐个 key 的进行分析、恢复，但是太过于复杂。
+所以，buntdb 采用了当有索引删除时，回滚需要重新用回滚后的 all keys 重建整个索引。

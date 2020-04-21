@@ -1423,6 +1423,8 @@ func (db *DB) Begin(writable bool) (*Tx, error) {
 		// [attention]
 		// writable transactions have a writeContext object that
 		// contains information about changes to the database.
+		//
+		// this object may be used when rollback or commit.
 		tx.wc = &txWriteContext{}
 		tx.wc.rollbackItems   = make(map[string]*dbItem)
 		tx.wc.rollbackIndexes = make(map[string]*index)
@@ -1461,7 +1463,7 @@ func (tx *Tx) rollbackInner() {
 	// rollback the deleteAll if needed
 	//
 	// if tx.wc.rbkeys != nil, means a DeleteAll() has been called in tx,
-	// rollback should recover those core indexes first.
+	// rollback should recover those objects first.
 	if tx.wc.rbkeys != nil {
 		tx.db.keys = tx.wc.rbkeys
 		tx.db.idxs = tx.wc.rbidxs
@@ -1471,7 +1473,7 @@ func (tx *Tx) rollbackInner() {
 
 	// tx.wc.rollbackItems holds the keys have been changed in tx with their previous value,
 	// those keys have been insert to database currently, so rollback should delete them first,
-	// then reinsert with previous value.
+	// then reinsert them with previous values.
 	for key, item := range tx.wc.rollbackItems {
 
 		// 1. delete key
@@ -1505,7 +1507,8 @@ func (tx *Tx) rollbackInner() {
 			// items or the index is complex.
 			tx.db.idxs[name] = idx
 
-			//
+			// [attention]
+			// why need rebuild ?
 			idx.rebuild()
 		}
 	}
@@ -1535,11 +1538,11 @@ func (tx *Tx) Commit() error {
 
 
 
-	// the is condition means:
+	// the if condition means:
 	//
 	//  1. tx.db.persist 				=> should sync tx.db to disk.
 	//  2. (len(tx.wc.commitItems) > 0  => there are items should save in disk
-	//  3. tx.wc.rbkeys != nil 			=> a DeleteAll() was called in current tx,
+	//  3. tx.wc.rbkeys != nil 			=> a DeleteAll() was called in current tx, so a flushdb command should save file first.
 
 	if tx.db.persist && (len(tx.wc.commitItems) > 0 || tx.wc.rbkeys != nil) {
 
@@ -1626,10 +1629,6 @@ func (tx *Tx) Rollback() error {
 	return nil
 }
 
-
-
-
-
 // dbItemOpts holds various meta information about an item.
 type dbItemOpts struct {
 	ex   bool      // does this item expire?
@@ -1664,8 +1663,10 @@ func appendBulkString(buf []byte, s string) []byte {
 func (dbi *dbItem) writeSetTo(buf []byte) []byte {
 
 	if dbi.opts != nil && dbi.opts.ex {
+
 		// expiration in seconds
 		ex := dbi.opts.exat.Sub(time.Now()) / time.Second
+
 		// build byte slice
 		buf = appendArray(buf, 5)											// [*, 5, \r, \n]
 		buf = appendBulkString(buf, "set")									// [$, 3, \r, \n, s, e, t, \r, \n]
@@ -2136,6 +2137,7 @@ func (tx *Tx) scan(desc, gt, lt bool, index, start, stop string, iterator func(k
 // This is a very simple pattern matcher where '*' matches on any number
 // characters and '?' matches on any one character.
 //
+//
 func Match(key, pattern string) bool {
 	return match.Match(key, pattern)
 }
@@ -2360,9 +2362,12 @@ func (tx *Tx) AscendEqual(index, pivot string,
 
 // DescendEqual calls the iterator for every item in the database that equals
 // pivot, until iterator returns false.
+//
 // When an index is provided, the results will be ordered by the item values
 // as specified by the less() function of the defined index.
+//
 // When an index is not provided, the results will be ordered by the item key.
+//
 // An invalid index will return an error.
 func (tx *Tx) DescendEqual(index, pivot string, iterator func(key, value string) bool) error {
 	var err error
