@@ -2,7 +2,6 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="2905ed96-ff4f-40b0-b760-9b9d8ce85381" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/comment.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/buntdb.go" beforeDir="false" afterPath="$PROJECT_DIR$/buntdb.go" afterDir="false" />
     </list>
@@ -17,8 +16,8 @@
       <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/buntdb.go">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="430">
-              <caret line="413" column="32" lean-forward="true" selection-start-line="413" selection-start-column="32" selection-end-line="413" selection-end-column="32" />
+            <state relative-caret-position="584">
+              <caret line="1396" column="16" selection-start-line="1396" selection-start-column="16" selection-end-line="1396" selection-end-column="16" />
               <folding>
                 <element signature="e#295#523#0" expanded="true" />
               </folding>
@@ -27,18 +26,19 @@
         </entry>
       </file>
       <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/logo.png">
-          <provider selected="true" editor-type-id="images" />
+        <entry file="file://$PROJECT_DIR$/../../tidwall/match/match.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="268">
+              <caret line="17" column="5" selection-start-line="17" selection-start-column="5" selection-end-line="17" selection-end-column="5" />
+            </state>
+          </provider>
         </entry>
       </file>
       <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/../../tidwall/match/README.md">
-          <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
-            <state split_layout="SPLIT">
-              <first_editor relative-caret-position="374">
-                <caret line="22" column="3" lean-forward="true" selection-start-line="22" selection-start-column="3" selection-end-line="22" selection-end-column="3" />
-              </first_editor>
-              <second_editor />
+        <entry file="file:///usr/local/Cellar/go/1.14/libexec/src/io/io.go">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="318">
+              <caret line="90" column="4" selection-start-line="90" selection-start-column="4" selection-end-line="90" selection-end-column="4" />
             </state>
           </provider>
         </entry>
@@ -46,8 +46,8 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/../../tidwall/btree/btree.go">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="12546">
-              <caret line="743" column="42" selection-start-line="743" selection-start-column="37" selection-end-line="743" selection-end-column="42" />
+            <state relative-caret-position="311">
+              <caret line="662" column="16" selection-start-line="662" selection-start-column="16" selection-end-line="662" selection-end-column="16" />
             </state>
           </provider>
         </entry>
@@ -56,7 +56,7 @@
         <entry file="file:///usr/local/Cellar/go/1.14/libexec/src/os/file_posix.go">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="1785">
-              <caret line="108" column="29" lean-forward="true" selection-start-line="108" selection-start-column="29" selection-end-line="108" selection-end-column="29" />
+              <caret line="108" column="29" selection-start-line="108" selection-start-column="29" selection-end-line="108" selection-end-column="29" />
             </state>
           </provider>
         </entry>
@@ -64,8 +64,8 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/buntdb_test.go">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="17">
-              <caret line="113" column="19" lean-forward="true" selection-start-line="113" selection-start-column="19" selection-end-line="113" selection-end-column="19" />
+            <state relative-caret-position="1717">
+              <caret line="113" column="19" selection-start-line="113" selection-start-column="19" selection-end-line="113" selection-end-column="19" />
             </state>
           </provider>
         </entry>
@@ -92,7 +92,7 @@
         <entry file="file://$PROJECT_DIR$/example/create_index/main.go">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="204">
-              <caret line="17" column="8" lean-forward="true" selection-start-line="17" selection-start-column="8" selection-end-line="17" selection-end-column="8" />
+              <caret line="17" column="8" selection-start-line="17" selection-start-column="8" selection-end-line="17" selection-end-column="8" />
             </state>
           </provider>
         </entry>
@@ -101,7 +101,7 @@
         <entry file="file://$PROJECT_DIR$/go.mod">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="204">
-              <caret line="12" lean-forward="true" selection-start-line="12" selection-end-line="12" />
+              <caret line="12" selection-start-line="12" selection-end-line="12" />
             </state>
           </provider>
         </entry>
@@ -144,8 +144,8 @@
       <list>
         <option value="$PROJECT_DIR$/example/iterate/main.go" />
         <option value="$PROJECT_DIR$/example/create_index/main.go" />
-        <option value="$PROJECT_DIR$/buntdb.go" />
         <option value="$PROJECT_DIR$/comment.txt" />
+        <option value="$PROJECT_DIR$/buntdb.go" />
       </list>
     </option>
   </component>
@@ -164,23 +164,6 @@
             <path>
               <item name="buntdb" type="b2602c69:ProjectViewProjectNode" />
               <item name="buntdb" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="buntdb" type="b2602c69:ProjectViewProjectNode" />
-              <item name="buntdb" type="462c0819:PsiDirectoryNode" />
-              <item name="example" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="buntdb" type="b2602c69:ProjectViewProjectNode" />
-              <item name="buntdb" type="462c0819:PsiDirectoryNode" />
-              <item name="example" type="462c0819:PsiDirectoryNode" />
-              <item name="create_index" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="buntdb" type="b2602c69:ProjectViewProjectNode" />
-              <item name="buntdb" type="462c0819:PsiDirectoryNode" />
-              <item name="example" type="462c0819:PsiDirectoryNode" />
-              <item name="iterate" type="462c0819:PsiDirectoryNode" />
             </path>
           </expand>
           <select />
@@ -241,7 +224,7 @@
     <frame x="0" y="0" width="1680" height="1050" extended-state="0" />
     <editor active="true" />
     <layout>
-      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.16483517" />
+      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.16666667" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Favorites" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Message" order="0" />
@@ -280,13 +263,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/../../tidwall/match/match.go">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="289">
-          <caret line="17" column="5" selection-start-line="17" selection-start-column="5" selection-end-line="17" selection-end-column="5" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/README.md">
       <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
         <state split_layout="SPLIT">
@@ -304,51 +280,23 @@
       <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
         <state split_layout="SPLIT">
           <first_editor relative-caret-position="374">
-            <caret line="22" column="3" lean-forward="true" selection-start-line="22" selection-start-column="3" selection-end-line="22" selection-end-column="3" />
+            <caret line="22" column="3" selection-start-line="22" selection-start-column="3" selection-end-line="22" selection-end-column="3" />
           </first_editor>
           <second_editor />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/../../tidwall/btree/btree.go">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="12546">
-          <caret line="743" column="42" selection-start-line="743" selection-start-column="37" selection-end-line="743" selection-end-column="42" />
         </state>
       </provider>
     </entry>
     <entry file="file:///usr/local/Cellar/go/1.14/libexec/src/os/file_posix.go">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="1785">
-          <caret line="108" column="29" lean-forward="true" selection-start-line="108" selection-start-column="29" selection-end-line="108" selection-end-column="29" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/example/iterate/main.go">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="187">
-          <caret line="16" column="10" selection-start-line="16" selection-start-column="10" selection-end-line="16" selection-end-column="10" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/go.mod">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="204">
-          <caret line="12" lean-forward="true" selection-start-line="12" selection-end-line="12" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/example/create_index/main.go">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="204">
-          <caret line="17" column="8" lean-forward="true" selection-start-line="17" selection-start-column="8" selection-end-line="17" selection-end-column="8" />
+          <caret line="108" column="29" selection-start-line="108" selection-start-column="29" selection-end-line="108" selection-end-column="29" />
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/buntdb_test.go">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="17">
-          <caret line="113" column="19" lean-forward="true" selection-start-line="113" selection-start-column="19" selection-end-line="113" selection-end-column="19" />
+        <state relative-caret-position="1717">
+          <caret line="113" column="19" selection-start-line="113" selection-start-column="19" selection-end-line="113" selection-end-column="19" />
         </state>
       </provider>
     </entry>
@@ -359,10 +307,52 @@
         </state>
       </provider>
     </entry>
+    <entry file="file://$PROJECT_DIR$/go.mod">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="204">
+          <caret line="12" selection-start-line="12" selection-end-line="12" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/example/create_index/main.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="204">
+          <caret line="17" column="8" selection-start-line="17" selection-start-column="8" selection-end-line="17" selection-end-column="8" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/example/iterate/main.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="187">
+          <caret line="16" column="10" selection-start-line="16" selection-start-column="10" selection-end-line="16" selection-end-column="10" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file:///usr/local/Cellar/go/1.14/libexec/src/io/io.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="318">
+          <caret line="90" column="4" selection-start-line="90" selection-start-column="4" selection-end-line="90" selection-end-column="4" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/../../tidwall/match/match.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="268">
+          <caret line="17" column="5" selection-start-line="17" selection-start-column="5" selection-end-line="17" selection-end-column="5" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/../../tidwall/btree/btree.go">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="311">
+          <caret line="662" column="16" selection-start-line="662" selection-start-column="16" selection-end-line="662" selection-end-column="16" />
+        </state>
+      </provider>
+    </entry>
     <entry file="file://$PROJECT_DIR$/buntdb.go">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="430">
-          <caret line="413" column="32" lean-forward="true" selection-start-line="413" selection-start-column="32" selection-end-line="413" selection-end-column="32" />
+        <state relative-caret-position="584">
+          <caret line="1396" column="16" selection-start-line="1396" selection-start-column="16" selection-end-line="1396" selection-end-column="16" />
           <folding>
             <element signature="e#295#523#0" expanded="true" />
           </folding>

@@ -65,36 +65,22 @@ var (
 type DB struct {
 
 	mu sync.RWMutex // the gatekeeper for all fields
-
-	file *os.File // the underlying file
-
-	buf []byte // a buffer to write to
-
+	file *os.File 	// the underlying file
+	buf []byte 		// a buffer to write to
 
 	// keys is the main database holding all DB items ordered by key.
-	keys *btree.BTree // a tree of all item ordered by key
-
-
-	exps *btree.BTree // a tree of items ordered by expiration
-
-
-
+	keys *btree.BTree // a tree of all items ordered by key
+	exps *btree.BTree // a tree of all items ordered by expiration
 
 	idxs map[string]*index // the index trees.
 
-	exmgr bool // indicates that expires manager is running.
-
-	flushes int // a count of the number of disk flushes
-
-	closed bool // set when the database has been closed
-
-	config Config // the database configuration
-
-	persist bool // do we write to disk
-
-	shrinking bool // when an aof shrink is in-process.
-
-	lastaofsz int // the size of the last shrink aof size
+	exmgr bool 		// indicates that expires manager is running.
+	flushes int 	// a count of the number of disk flushes
+	closed bool 	// set when the database has been closed
+	config Config 	// the database configuration
+	persist bool 	// do we write to disk
+	shrinking bool 	// when an aof shrink is in-process.
+	lastaofsz int 	// the size of the last shrink aof size
 
 }
 
@@ -114,12 +100,12 @@ const (
 	EverySecond = 1
 
 	// Always is used to sync data after every write to disk.
-	// Slow. Very safe.
+	// Slow but very safe.
 	Always = 2
 )
 
-// Config represents database configuration options. These
-// options are used to change various behaviors of the database.
+// Config represents database configuration options.
+// These options are used to change various behaviors of the database.
 type Config struct {
 
 	// SyncPolicy adjusts how often the data is synced to disk.
@@ -136,25 +122,25 @@ type Config struct {
 	// a shrink is triggered.
 	AutoShrinkPercentage int
 
-	// AutoShrinkMinSize defines the minimum size of the aof file before
-	// an automatic shrink can occur.
+
+	// AutoShrinkMinSize defines the minimum size of the aof file before an automatic shrink can occur.
 	AutoShrinkMinSize int
+
 
 	// AutoShrinkDisabled turns off automatic background shrinking
 	AutoShrinkDisabled bool
 
-	// OnExpired is used to custom handle the deletion option when a key
-	// has been expired.
+
+	// OnExpired is used to custom handle the deletion option when a key has been expired.
 	OnExpired func(keys []string)
 
 
-	// OnExpiredSync will be called inside the same transaction that is performing
-	// the deletion of expired items.
+
+	// OnExpiredSync will be called inside the same transaction that is performing the deletion of expired items.
 	//
 	// If OnExpired is present then this callback will not be called.
 	//
-	// If this callback is present, then the deletion of the timeed-out item
-	// is the explicit responsibility of this callback.
+	// If this callback is present, then the deletion of the timeed-out item is the explicit responsibility of this callback.
 	OnExpiredSync func(key, value string, tx *Tx) error
 
 }
@@ -242,8 +228,7 @@ func (db *DB) Close() error {
 
 	// Let's release all references to nil.
 	//
-	// This will help both with debugging late usage panics
-	// and it provides a hint to the garbage collector
+	// This will help both with debugging late usage panics and it provides a hint to the garbage collector.
 	db.keys, db.exps, db.idxs, db.file = nil, nil, nil, nil
 
 	return nil
@@ -320,17 +305,13 @@ func (db *DB) Load(rd io.Reader) error {
 	return db.readLoad(rd, time.Now())
 }
 
-// index represents a b-tree or r-tree index and also acts as the
-// b-tree/r-tree context for itself.
+// index represents a b-tree or r-tree index and also acts as the b-tree/r-tree context for itself.
 type index struct {
 
 	btr     *btree.BTree                           // contains the items
 	rtr     *rtree.RTree                           // contains the items
 
-
-	//
 	name    string                                 // name of the index
-
 
 	// Pattern specifies which keys the index takes effect on.
 	// You can create an index only for some keys of a specific pattern.
@@ -342,9 +323,7 @@ type index struct {
 	//
 	// Some sorting rules are built in buntdb, such as IndexString, which is insensitive to case,
 	// IndexInt/IndexUint/Indexfloat performs sorting of numeric types.
-	//
 	pattern string                                 // a required key pattern
-
 
 	less    func(a, b string) bool                 // less comparison function
 	rect    func(item string) (min, max []float64) // rect from string function
@@ -360,6 +339,7 @@ func (idx *index) match(key string) bool {
 		return true
 	}
 
+	// convert key to lower
 	if idx.opts.CaseInsensitiveKeyMatching {
 		for i := 0; i < len(key); i++ {
 			if key[i] >= 'A' && key[i] <= 'Z' {
@@ -369,7 +349,7 @@ func (idx *index) match(key string) bool {
 		}
 	}
 
-	//
+	// check if key match idx.pattern, return true or false.
 	return match.Match(key, idx.pattern)
 }
 
@@ -2492,11 +2472,9 @@ func (tx *Tx) Len() (int, error) {
 	return tx.db.keys.Len(), nil
 }
 
-// IndexOptions provides an index with additional features or
-// alternate functionality.
+// IndexOptions provides an index with additional features or alternate functionality.
 type IndexOptions struct {
-	// CaseInsensitiveKeyMatching allow for case-insensitive
-	// matching on keys when setting key/values.
+	// CaseInsensitiveKeyMatching allow for case-insensitive matching on keys when setting key/values.
 	CaseInsensitiveKeyMatching bool
 }
 
