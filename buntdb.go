@@ -651,7 +651,6 @@ func (db *DB) deleteFromDatabase(item *dbItem) *dbItem {
 	// if item with same key exist before, then...
 	if prev != nil {
 
-
 		pdbi = prev.(*dbItem)
 
 		// 2. Remove it from the exipres tree.
@@ -1442,7 +1441,7 @@ func (tx *Tx) rollbackInner() {
 
 	// rollback the deleteAll if needed
 	//
-	// if tx.wc.rbkeys != nil, means a DeleteAll() has been called in tx,
+	// if tx.wc.rbkeys != nil, means a DeleteAll() has been called at least once in tx lifecircle,
 	// rollback should recover those objects first.
 	if tx.wc.rbkeys != nil {
 		tx.db.keys = tx.wc.rbkeys
@@ -1450,8 +1449,8 @@ func (tx *Tx) rollbackInner() {
 		tx.db.exps = tx.wc.rbexps
 	}
 
-
-	// tx.wc.rollbackItems holds the keys have been changed in tx with their previous value,
+	// tx.wc.rollbackItems holds the keys were changed before the first DeleteAll(if have one) in tx with their previous value,
+	//
 	// those keys have been insert to database currently, so rollback should delete them first,
 	// then reinsert them with previous values.
 	for key, item := range tx.wc.rollbackItems {
@@ -1471,6 +1470,7 @@ func (tx *Tx) rollbackInner() {
 			tx.db.insertIntoDatabase(item)
 		}
 	}
+
 
 	// tx.wc.rollbackIndexes holds the indexes have been deleted in tx,
 	// those keys have been insert to database currently, so rollback should delete them first,
@@ -1931,8 +1931,8 @@ func (tx *Tx) Get(key string, ignoreExpired ...bool) (val string, err error) {
 	return item.val, nil
 }
 
-// Delete removes an item from the database based on the item's key. If the item
-// does not exist or if the item has expired then ErrNotFound is returned.
+// Delete removes an item from the database based on the item's key.
+// If the item does not exist or if the item has expired then ErrNotFound is returned.
 //
 // Only a writable transaction can be used for this operation.
 // This operation is not allowed during iterations such as Ascend* & Descend*.
@@ -1946,19 +1946,26 @@ func (tx *Tx) Delete(key string) (val string, err error) {
 		return "", ErrTxIterating
 	}
 
-	//
+	// delete key from db.keys, db.exps, db.idxs .
 	item := tx.db.deleteFromDatabase(&dbItem{key: key})
 	if item == nil {
 		return "", ErrNotFound
 	}
 
 	// create a rollback entry if there has not been a deleteAll call.
+	//
+	//
+	// [!!!]
+	// if tx.wc.rbkeys != nil, means at least once DeleteAll() were called during Tx lifecycle,
+	// any Set/Delete after the first DeleteAll() need not saved in tx.wc.rollbackItems[] because
+	// rollback the DeleteAll() is enough.
+	//
 	if tx.wc.rbkeys == nil {
+		// save prev item of key in tx.wc.rollbackItems for rollback.
 		if _, ok := tx.wc.rollbackItems[key]; !ok {
 			tx.wc.rollbackItems[key] = item
 		}
 	}
-
 
 	// tx.wc.commitItems save the entries waiting for writing to disk after commit.
 	// so, when key is delete from tx.db, it should also be removed from this map.
@@ -1967,7 +1974,6 @@ func (tx *Tx) Delete(key string) (val string, err error) {
 	if tx.db.persist {
 		tx.wc.commitItems[key] = nil
 	}
-
 
 	// Even though the item has been deleted, we still want to check if it has expired.
 	// An expired item should not be returned.
@@ -2668,7 +2674,6 @@ func (tx *Tx) DropIndex(name string) error {
 	// this is all that is needed to delete an index.
 	delete(tx.db.idxs, name)
 
-
 	//
 	if tx.wc.rbkeys == nil {
 		// store the index in the rollback map.
@@ -2685,15 +2690,11 @@ func (tx *Tx) DropIndex(name string) error {
 // Indexes returns a list of index names.
 func (tx *Tx) Indexes() ([]string, error) {
 
-
-
 	if tx.db == nil {
 		return nil, ErrTxClosed
 	}
 
-
 	names := make([]string, 0, len(tx.db.idxs))
-
 	for name := range tx.db.idxs {
 		names = append(names, name)
 	}
